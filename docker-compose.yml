@@ -43,17 +43,21 @@ services:
       redis: { condition: service_healthy }
 
   worker:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile.worker       # heavier image: Docling + PyTorch
     command: celery -A app.workers.celery_app worker --loglevel=info --concurrency=1
     env_file: .env
     volumes:
       - .:/app
       - uploads:/app/uploads              # SAME volume as the api
+      - model_cache:/root/.cache          # Docling/HuggingFace models download ONCE, then persist
     depends_on:
       postgres: { condition: service_healthy }
       rabbitmq: { condition: service_healthy }
       redis: { condition: service_healthy }
 
 volumes:
+  model_cache:
   pgdata:
   uploads:
