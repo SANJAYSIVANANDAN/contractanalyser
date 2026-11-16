@@ -37,6 +37,7 @@ services:
     volumes:
       - .:/app                            # live code reload during development
       - uploads:/app/uploads              # shared with the worker (added in Phase 2)
+      - model_cache:/root/.cache          # reranker model downloads once
     depends_on:
       postgres: { condition: service_healthy }
       rabbitmq: { condition: service_healthy }

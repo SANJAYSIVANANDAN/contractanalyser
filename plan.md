@@ -31,6 +31,7 @@ Phase 1 execution therefore = review those files, run them, verify.
 - Verify: three small scripts/tests print ranked lists for a known question.
 
 **Phase 5 (80–105) — grounded answers + SSE**
+- **CHANGE (user request, Phase 4): use LangChain + LangGraph.** Retrieval/RRF/reranker stay custom (tested). `rag.py` becomes a LangGraph `StateGraph` with explicit nodes: `retrieve` (hybrid_retrieve) → `rerank` → `generate` (LangChain `ChatOpenAI` + `ChatPromptTemplate`, structured output of answer + cited chunk_ids) → `validate_citations` (backend rebuilds citations from DB). Conditional edge: no chunks → straight to an insufficient-evidence node. Streaming uses `graph.astream(stream_mode="messages")`. Embeddings stay on the OpenAI SDK.
 - `rag.py`: chunks passed with their UUIDs; LLM returns JSON (answer + cited chunk_ids); backend validates IDs ⊆ retrieved set, rebuilds citations (filename, page, section, excerpt) from DB rows only; empty retrieval → `insufficient_evidence=true`, no citations. Strict system prompt from spec.
 - `schemas/chat.py`, `api/chat.py`: `POST /chat`, `POST /chat/stream` (events token / citations / done), persist messages, handle disconnect + OpenAI errors, `GET /conversations/{id}/messages`.
 - Streaming design decision: stream tokens of the answer, then validate citation IDs and send `citations` event after (citations never come from raw model text).
@@ -45,6 +46,7 @@ Phase 1 execution therefore = review those files, run them, verify.
 ## Key design decisions
 - Worker receives only `document_id`; PDFs on shared Docker volume.
 - Citations built in backend from DB metadata; LLM only picks chunk IDs.
+- LangChain/LangGraph (added at user's request, reversing the original "avoid" instruction) orchestrate generation only, not retrieval.
 - Alembic owns schema; no `create_all` in production path.
 - Pin dependency versions; add heavy deps (celery, docling, sentence-transformers, openai, redis, streamlit, ragas) only in the phase that needs them. Worker image is separate/heavier than API image (torch).
 
