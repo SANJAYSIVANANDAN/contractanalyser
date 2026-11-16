@@ -4,6 +4,7 @@ Every search function returns a list of Chunk objects ORDERED best-first.
 RRF only looks at the ORDER (rank), never at the raw scores, because cosine
 distances and ts_rank values live on different scales and can't be added together.
 """
+import logging
 import re
 import uuid
 
@@ -11,7 +12,10 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.db.models import Chunk
+from app.services.cache import get_cached_retrieval, make_retrieval_key, set_cached_retrieval
 from app.services.embeddings import embed_query
+
+logger = logging.getLogger(__name__)
 
 TOP_K_EACH = 15   # candidates taken from each search
 RRF_K = 60        # standard RRF constant: dampens the advantage of rank 1 over rank 2
@@ -65,11 +69,37 @@ def reciprocal_rank_fusion(rankings: list[list[Chunk]], k: int = RRF_K, top_n: i
     return [(chunks_by_id[chunk_id], scores[chunk_id]) for chunk_id in best_first]
 
 
+def load_chunks_in_order(db: Session, chunk_ids: list[str]) -> list[Chunk] | None:
+    """Fetch chunks by id, keeping the cached order. Returns None if any chunk no longer
+    exists (document was deleted/reprocessed), which makes the caller treat it as a miss."""
+    ids = [uuid.UUID(chunk_id) for chunk_id in chunk_ids]
+    by_id = {chunk.id: chunk for chunk in db.scalars(select(Chunk).where(Chunk.id.in_(ids)))}
+    if len(by_id) != len(set(ids)):
+        return None
+    return [by_id[chunk_id] for chunk_id in ids]
+
+
 def hybrid_retrieve(db: Session, question: str, document_ids: list[uuid.UUID], top_n: int = 15) -> list[tuple[Chunk, float]]:
-    """Full retrieval step: embed question -> semantic + keyword -> RRF."""
+    """Full retrieval step with a cache-aside Redis cache:
+    hit  -> reload the cached chunk ids from Postgres (skips the OpenAI embedding call and both searches)
+    miss -> embed question -> semantic + keyword -> RRF -> store in Redis."""
     if not document_ids:
         return []
+
+    key = make_retrieval_key(question, document_ids)
+    cached = get_cached_retrieval(key)
+    if cached is not None:
+        chunks = load_chunks_in_order(db, [chunk_id for chunk_id, _score in cached])
+        if chunks is not None:
+            logger.info("retrieval cache HIT")
+            return [(chunk, score) for chunk, (_id, score) in zip(chunks, cached)]
+
+    logger.info("retrieval cache MISS")
     query_vector = embed_query(question)
     semantic = semantic_search(db, query_vector, document_ids)
     keyword = keyword_search(db, question, document_ids)
-    return reciprocal_rank_fusion([semantic, keyword], top_n=top_n)
+    fused = reciprocal_rank_fusion([semantic, keyword], top_n=top_n)
+
+    if fused:   # never cache an empty result
+        set_cached_retrieval(key, document_ids, [[str(chunk.id), score] for chunk, score in fused])
+    return fused

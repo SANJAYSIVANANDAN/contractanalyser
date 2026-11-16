@@ -58,6 +58,19 @@ services:
       rabbitmq: { condition: service_healthy }
       redis: { condition: service_healthy }
 
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    command: streamlit run frontend/streamlit_app.py --server.port 8501 --server.address 0.0.0.0 --server.headless true
+    environment:
+      API_URL: http://api:8000            # container-to-container address
+    ports: ["8502:8501"]                  # host 8502 (8501 was taken by another project)
+    volumes:
+      - ./frontend:/app/frontend
+    depends_on:
+      - api
+
 volumes:
   model_cache:
   pgdata:

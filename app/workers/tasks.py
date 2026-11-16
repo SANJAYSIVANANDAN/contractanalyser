@@ -5,7 +5,7 @@ from sqlalchemy import delete, func
 
 from app.db.database import SessionLocal
 from app.db.models import COMPLETED, FAILED, PENDING, PROCESSING, Chunk, Document
-from app.services.cache import acquire_lock, release_lock
+from app.services.cache import acquire_lock, invalidate_document, release_lock
 from app.services.chunker import chunk_blocks
 from app.services.document_parser import parse_pdf
 from app.services.embeddings import embed_texts
@@ -79,6 +79,8 @@ def process_document(self, document_id: str):
             )
         doc.status = COMPLETED
         db.commit()
+        # Chunk ids just changed, so any cached retrieval that pointed at the old ones is stale.
+        invalidate_document(doc_id)
         return f"ok: {len(chunks)} chunks"
 
     except RETRYABLE as e:

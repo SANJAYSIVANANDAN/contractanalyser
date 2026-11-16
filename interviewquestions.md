@@ -178,8 +178,17 @@ Answer streaming is one-way (server → client). SSE is plain HTTP, auto-reconne
 **52. What if the client disconnects mid-stream?**
 The generator receives `GeneratorExit`, stops, and nothing half-finished is stored.
 
-**53. Why is Redis in this stack? (cache not built yet)**
-Today: the processing lock. Planned: cache-aside for retrieval results with a 600 s TTL, keyed by normalized question + sorted document IDs + retrieval config version, invalidated on delete/reprocess. It holds nothing permanent.
+**53. Why is Redis in this stack, and how does the cache work?**
+Two jobs: the processing lock (`SET NX EX`) and a cache-aside store for retrieval results with a 600 s TTL. The key is a hash of the normalized question + sorted document IDs, prefixed with a retrieval version. On a hit we get cached chunk IDs and reload the chunks from Postgres (skipping the query embedding and both searches); on a miss we compute and store. Entries are indexed per document so deleting or reprocessing a document removes them. It holds IDs and scores only — nothing permanent. Measured: 0.605 s cold vs 0.019 s cached.
+
+**53b. Why cache chunk IDs instead of the chunk text?**
+Contract text stays in Postgres as the single source of truth, the cache stays small, and a missing chunk (deleted or reprocessed) is detected on reload and treated as a miss, so stale data can't be cited.
+
+**53c. What happens to the cache if Redis is down?**
+Reads and writes catch Redis errors, log a warning, and behave like a miss, so chat keeps working (tested; it was slower, ~11 s, while connections failed). The ingestion worker is *not* protected the same way yet.
+
+**53d. Why is the overall request barely faster with a cache hit?**
+Retrieval was only ~0.6 s of a ~4 s request; the LLM call dominates and isn't cached. The cache mainly saves an OpenAI embedding call and database work for repeated questions.
 
 **54. Why RabbitMQ and not just Redis as the broker?**
 RabbitMQ has durable queues and explicit acknowledgements built for reliable delivery; Redis would work but is better suited as a cache here, and keeping roles separate makes failure modes clearer.

@@ -10,6 +10,7 @@ from app.config import settings
 from app.db.database import get_db
 from app.db.models import Document
 from app.schemas.documents import DocumentOut, DocumentStatusOut
+from app.services.cache import invalidate_document
 from app.workers.tasks import process_document
 
 router = APIRouter(prefix="/documents", tags=["documents"])
@@ -84,4 +85,5 @@ def delete_document(doc_id: uuid.UUID, db: Session = Depends(get_db)):
         os.remove(doc.file_path)
     db.delete(doc)  # cascades to chunks and clauses
     db.commit()
+    invalidate_document(doc_id)  # drop cached retrievals that included this document
     return {"deleted": str(doc_id)}

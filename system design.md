@@ -2,7 +2,7 @@
 
 A contract-intelligence chatbot. Users upload contract PDFs, then ask questions. Every factual answer is backed by citations (filename, real PDF page, section, excerpt) that the **backend** builds from database rows — never from text the LLM wrote.
 
-> **Status as of Phase 5.** Built and tested: upload, async ingestion, hybrid retrieval, reranking, LangGraph answer pipeline, citation validation, `/chat`, SSE `/chat/stream`, conversation history. **Not built yet:** Redis retrieval cache (Phase 6), Streamlit UI (Phase 6), clause extraction + `/clauses` `/analysis` endpoints, RAGAS evaluation. See [section 13](#13-status-against-the-acceptance-criteria).
+> **Status as of Phase 6.** Built and tested: upload, async ingestion, hybrid retrieval, Redis retrieval cache, reranking, LangGraph answer pipeline, citation validation, `/chat`, SSE `/chat/stream`, conversation history, Streamlit UI. **Not built yet:** clause extraction + `/clauses` `/analysis` endpoints, RAGAS evaluation, OCR. See [section 13](#13-status-against-the-acceptance-criteria).
 
 ---
 
@@ -11,10 +11,10 @@ A contract-intelligence chatbot. Users upload contract PDFs, then ask questions.
 ```
                          ┌──────────────┐   HTTP / SSE   ┌─────────────────────────┐
                          │  Client      │ ─────────────► │  FastAPI  (Process A)   │
-                         │ (curl; Streamlit later)       │  upload, status, chat   │
+                         │ (Streamlit UI / curl)         │  upload, status, chat   │
                          └──────────────┘                └──┬────────┬─────────┬───┘
                                                             │        │         │
-                                         publish doc_id     │        │ SQL     │ (Phase 6) cache
+                                         publish doc_id     │        │ SQL     │ retrieval cache
                                                             ▼        ▼         ▼
                                                      ┌──────────┐ ┌────────────────┐ ┌───────┐
                                                      │ RabbitMQ │ │ PostgreSQL     │ │ Redis │
@@ -52,7 +52,8 @@ The message on the queue contains **only the document ID**. The worker loads the
 | **pgvector** | Vector similarity | One database instead of a second vector store: chunk metadata and vectors are joined in a single query and committed in a single transaction. HNSW index for fast cosine search. |
 | **RabbitMQ** | Message broker | Durable queue between API and worker. If the worker is down, tasks wait. Acks give at-least-once delivery. |
 | **Celery** | Task framework | Worker lifecycle, retries with backoff, acks — so we don't hand-write a consumer loop. |
-| **Redis** | Lock now, cache later | Fast, atomic `SET NX EX` for the processing lock; will hold the 600 s retrieval cache. Disposable by design — no permanent contract data lives there. |
+| **Redis** | Processing lock + retrieval cache | Fast, atomic `SET NX EX` for the processing lock; cache-aside store for retrieval results with a 600 s TTL. Disposable by design — no permanent contract data lives there. |
+| **Streamlit** | UI | Minimal Python-only front end: upload, document status, document selection, streaming chat, citation blocks. Talks to the API over HTTP/SSE. |
 | **Docling** | PDF → structured document | Preserves layout, headings, tables, and per-item page provenance (`prov[].page_no`), which citations depend on. |
 | **OpenAI `text-embedding-3-small`** | Embeddings (1536-dim) | Cheap, strong baseline. The *same* model embeds chunks and queries. |
 | **CrossEncoder `ms-marco-MiniLM-L-6-v2`** | Local reranker | Reads question + passage together → much more precise than embeddings; runs locally, no API call. |
@@ -151,6 +152,17 @@ RRF(d) = Σ over rankings  1 / (k + rank(d))      k = 60, rank starts at 1
 
 Only ranks are used, never raw scores — cosine distance and `ts_rank` are on different scales and can't be added. A chunk found by both searches gets two terms and rises. Verified: the top payment chunk scored `0.0328 = 1/61 + 1/61`.
 
+**Retrieval cache (cache-aside).** In `hybrid_retrieve` ([retrieval.py](app/services/retrieval.py), keys and helpers in [cache.py](app/services/cache.py)):
+
+1. Key = `retrieval:<version>:<sha256(normalized question | sorted document ids)>`. Normalizing (lowercase, collapsed spaces) and sorting ids means equivalent searches share an entry; `RETRIEVAL_VERSION` is bumped when retrieval logic changes.
+2. **Hit:** Redis holds `[[chunk_id, rrf_score], ...]`; the chunks are reloaded from Postgres by id (the cache stores ids and scores only, never contract text). This skips the OpenAI query embedding and both searches.
+3. **Miss:** run the searches + RRF, store the result with a 600 s TTL. Empty results are never cached.
+4. If any cached chunk no longer exists, the entry is treated as a miss.
+5. **Invalidation:** each entry is also registered in a per-document set (`retrieval_keys:<doc_id>`); `DELETE /documents/{id}` and a finished (re)processing in the worker remove every entry that included that document.
+6. **Redis down:** reads/writes are skipped with a warning and chat still works (tested: HTTP 200, but slower).
+
+Measured: cold lookup 0.605 s → cached 0.019 s. Over HTTP the total request is ≈ 3–4 s either way, because the LLM call dominates and is intentionally not cached. The cache saves ≈ 0.6 s and an embedding call per repeated question.
+
 **Rerank + score floor.** Embeddings encode question and passage separately (fast, rough). A cross-encoder reads them together (slow, precise), so it only runs on the ~15 RRF candidates. Its scores are raw logits, not probabilities.
 
 **Why a score floor is necessary.** Vector search *always* returns its nearest neighbours, even for "What is the capital of France?". An empty result therefore can't signal "no evidence". Calibration run on this document (15 questions):
@@ -207,6 +219,8 @@ SSE choice: the stream is one-directional (server → client), works over plain 
 | Scanned PDF (no text layer) | `FAILED: no text extracted` — OCR is off (deferred) |
 | Lock holder crashes | Lock expires after 1800 s (TTL) |
 | Client disconnects mid-stream | Generator stops; nothing half-finished is stored |
+| Redis down during chat | Cache skipped with a warning; answer still returned (tested). Ingestion is **not** protected: the worker's lock call fails before its `try` block, leaving the document `PENDING` (known gap) |
+| Stale cache after delete/reprocess | Entries for that document are removed (tested: 3 keys → 0 after reprocess) |
 | OpenAI failure during chat | `/chat` → 502; stream → `event: error` |
 | DB failure when saving the answer | Rollback, `event: error` |
 
@@ -243,6 +257,8 @@ SSE choice: the stream is one-directional (server → client), works over plain 
 5. No auth, no per-user document ownership, no rate limiting.
 6. Uploaded files are validated by extension and magic bytes only (no malware scan).
 7. Output is an informational aid, not legal advice.
+8. The API's `--reload` does not reliably pick up file changes on Windows bind mounts — restart the container after editing code.
+9. The reranker is preloaded at API startup (first request ≈ 3.5 s instead of ≈ 17 s), which makes API start-up slower.
 
 ---
 
@@ -267,10 +283,10 @@ SSE choice: the stream is one-directional (server → client), works over plain 
 | 15 | Citation filename/page come from DB metadata | ✅ tested |
 | 16 | Unsupported questions → insufficient evidence | ✅ tested (termination, off-topic) |
 | 17 | SSE streams the response | ✅ tested (51 token events → citations → done) |
-| 18 | Redis caches retrieval results | ❌ not built (Phase 6) |
-| 19 | Streamlit displays answer and citations | ❌ not built (Phase 6) |
+| 18 | Redis caches retrieval results | ✅ tested (MISS → HIT → HIT for a repeated/normalized question, TTL ≈ 600 s, invalidation on reprocess) |
+| 19 | Streamlit displays answer and citations | ✅ tested headlessly with Streamlit `AppTest` against the live API (answer, source blocks with filename and page, insufficient-evidence warning). **Not checked visually in a browser.** |
 
-Deferred: clause extraction and `/clauses` `/analysis` endpoints, RAGAS evaluation, OCR.
+Deferred: clause extraction and `/clauses` `/analysis` endpoints (so the UI has a "Summarize" button that uses chat, but no extracted-clauses panel), RAGAS evaluation, OCR.
 
 ---
 
@@ -290,14 +306,15 @@ app/services/embeddings.py        OpenAI embeddings
 app/services/retrieval.py         semantic, keyword, RRF
 app/services/reranker.py          CrossEncoder
 app/services/rag.py               LangGraph pipeline + citation validation
-app/services/cache.py             Redis client + lock (retrieval cache in Phase 6)
+app/services/cache.py             Redis client, processing lock, retrieval cache
+frontend/streamlit_app.py         Streamlit UI
 app/workers/                      Celery app + process_document task
 alembic/                          migrations
 tests/                            try_retrieval.py, test_citations.py, sample PDF
 ```
 
 ```bash
-docker compose up -d --build                 # API :8001, RabbitMQ UI :15673, Postgres :5433, Redis :6380
+docker compose up -d --build                 # UI :8502, API :8001, RabbitMQ UI :15673, Postgres :5433, Redis :6380
 docker compose exec api alembic upgrade head # create tables (first run)
 curl -F "file=@tests/Masked_apeXaudit-Proposal_v8.pdf" localhost:8001/documents/upload
 curl localhost:8001/documents/<id>/status    # wait for COMPLETED
@@ -306,7 +323,7 @@ curl -X POST localhost:8001/chat -H 'Content-Type: application/json' \
 docker compose exec api python -m tests.test_citations
 ```
 
-Host ports are shifted (8001/5433/5673/15673/6380) because another project was using the defaults; containers talk to each other on the standard ports.
+Open http://localhost:8502 for the UI. Host ports are shifted (8502/8001/5433/5673/15673/6380) because another project was using the defaults; containers talk to each other on the standard ports.
 
 ---
 
