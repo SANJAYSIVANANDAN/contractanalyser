@@ -2,7 +2,7 @@
 
 A contract-intelligence chatbot. Users upload contract PDFs, then ask questions. Every factual answer is backed by citations (filename, real PDF page, section, excerpt) that the **backend** builds from database rows — never from text the LLM wrote.
 
-> **Status as of Phase 6.** Built and tested: upload, async ingestion, hybrid retrieval, Redis retrieval cache, reranking, LangGraph answer pipeline, citation validation, `/chat`, SSE `/chat/stream`, conversation history, Streamlit UI. **Not built yet:** clause extraction + `/clauses` `/analysis` endpoints, RAGAS evaluation, OCR. See [section 13](#13-status-against-the-acceptance-criteria).
+> **Status as of Phase 6.** Built and tested: upload, async ingestion, hybrid retrieval, Redis retrieval cache, reranking, LangGraph answer pipeline, citation validation, `/chat`, SSE `/chat/stream`, conversation history, Streamlit UI, RAGAS evaluation (section 7b). **Not built yet:** clause extraction + `/clauses` `/analysis` endpoints, OCR. See [section 13](#13-status-against-the-acceptance-criteria).
 
 ---
 
@@ -191,6 +191,43 @@ Tested with fabricated model outputs ([tests/test_citations.py](tests/test_citat
 
 ---
 
+## 7b. Evaluation (RAGAS)
+
+Code: [dataset.py](app/evaluation/dataset.py) (12 hand-written questions, each reference answer checked against the contract text and tagged with the gold page) and [evaluate.py](app/evaluation/evaluate.py). Run offline only: `docker compose --profile eval run --rm eval` (separate image, ~20 min, small OpenAI cost). Results are saved to `app/evaluation/results/` as JSON and CSV.
+
+For each question, four configurations each retrieve 5 passages: **A** vector only, **B** keyword only, **C** hybrid (RRF), **D** hybrid + CrossEncoder rerank (production score floor *not* applied, so D is judged on ranking only). The same prompt and model generate each answer; RAGAS (judge: gpt-4o-mini) scores it.
+
+| Metric | What it measures | Low value points to |
+|---|---|---|
+| **Faithfulness** | Share of the answer's claims supported by the retrieved passages | Generation problem (model added unsupported content) |
+| **Answer relevancy** | Whether the answer addresses the question (judged from questions the answer implies) | Rambling, off-topic or hedged answers |
+| **Context precision** | Whether the relevant passages are ranked near the top of what was retrieved | Ranking/noise problem in retrieval |
+| **Context recall** | Whether the retrieved passages contain what the reference answer needs | Retrieval missed information |
+
+**Results** (12 questions, one contract, 0 missing scores; file `ragas_20261116_115547`):
+
+| Config | Faithfulness | Answer relevancy | Context precision | Context recall |
+|---|---|---|---|---|
+| A vector only | 0.972 | 0.821 | 0.790 | 0.896 |
+| B keyword only | 0.942 | 0.722 | 0.874 | 0.979 |
+| C hybrid (RRF) | 0.972 | 0.807 | **0.881** | 0.958 |
+| D hybrid + rerank | 0.962 | 0.774 | 0.769 | 0.958 |
+
+**What the results do and don't show**
+- No configuration wins on every metric. Hybrid (C) has the best precision, ties for the best faithfulness, and has near-best recall. Keyword (B) has the best recall but the worst answer relevancy and faithfulness.
+- **The reranker is not shown to help.** D has the lowest precision and no recall gain over C, so the claim "reranking improves quality" is **not supported** by this data. (In production the reranker's other job — the score floor that detects "no evidence" — is separate and tested in section 6.)
+- Hybrid's value shows up per question: on "Why is Phase-1 export-driven?" vector search had context recall 0.0 (it retrieved headings containing "Export-Driven" but not the passage about Sell.Do's missing APIs), while keyword and hybrid scored 1.0.
+- **Small sample.** With 12 questions, one question flipping from 0 to 1 moves a mean by 0.083. Most gaps above are within that noise; treat the table as a baseline, not a ranking.
+
+**Caveats**
+- Answer relevancy is unreliable here: RAGAS scored 0.00 on "What is the total duration?" for all four configs although the answers were correct (it appears to treat the hedge "depending on client validation turnaround" as non-committal), and RAGAS warned it could generate only 1 of the 3 questions it normally uses.
+- The judge and the generator are the same model family (gpt-4o-mini), which can flatter faithfulness.
+- Our own `page_hit` check (did any retrieved chunk come from the gold page?) was 1.0 for all configs, so it is too coarse to discriminate.
+- A single run; repeat runs were not done, so run-to-run variance is unknown. An earlier run with RAGAS's default concurrency produced many timeouts (missing scores) and was discarded; the final run uses 4 workers and a 300 s timeout.
+- Unanswerable questions are excluded (RAGAS needs a reference); that behaviour is covered by the chat tests.
+
+---
+
 ## 8. API
 
 | Endpoint | State |
@@ -286,7 +323,7 @@ SSE choice: the stream is one-directional (server → client), works over plain 
 | 18 | Redis caches retrieval results | ✅ tested (MISS → HIT → HIT for a repeated/normalized question, TTL ≈ 600 s, invalidation on reprocess) |
 | 19 | Streamlit displays answer and citations | ✅ tested headlessly with Streamlit `AppTest` against the live API (answer, source blocks with filename and page, insufficient-evidence warning). **Not checked visually in a browser.** |
 
-Deferred: clause extraction and `/clauses` `/analysis` endpoints (so the UI has a "Summarize" button that uses chat, but no extracted-clauses panel), RAGAS evaluation, OCR.
+Deferred: clause extraction and `/clauses` `/analysis` endpoints (so the UI has a "Summarize" button that uses chat, but no extracted-clauses panel), OCR.
 
 ---
 
@@ -310,6 +347,8 @@ app/services/cache.py             Redis client, processing lock, retrieval cache
 frontend/streamlit_app.py         Streamlit UI
 app/workers/                      Celery app + process_document task
 alembic/                          migrations
+app/evaluation/                   RAGAS dataset, evaluate.py, results/
+Dockerfile.eval, requirements-eval.txt   separate image for evaluation (RAGAS)
 tests/                            try_retrieval.py, test_citations.py, sample PDF
 ```
 
@@ -321,6 +360,7 @@ curl localhost:8001/documents/<id>/status    # wait for COMPLETED
 curl -X POST localhost:8001/chat -H 'Content-Type: application/json' \
      -d '{"question": "What are the payment milestones?"}'
 docker compose exec api python -m tests.test_citations
+docker compose --profile eval run --rm eval  # RAGAS evaluation (~20 min, uses OpenAI)
 ```
 
 Open http://localhost:8502 for the UI. Host ports are shifted (8502/8001/5433/5673/15673/6380) because another project was using the defaults; containers talk to each other on the standard ports.

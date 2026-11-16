@@ -137,11 +137,23 @@ Users must be able to tell direct contract wording from the model's reading of i
 **41. Why numbered sources `[1]..[5]` instead of UUIDs in the prompt?**
 Short numbers are easier for the model to copy correctly than 36-character UUIDs. The mapping back to real chunk UUIDs is done by the backend. The security property (model can only reference what we sent) is unchanged.
 
-**42. What are RAGAS's four metrics? (not built yet)**
+**42. What are RAGAS's four metrics?**
 *Faithfulness*: are the answer's claims supported by the retrieved context (hallucination check). *Answer relevancy*: does the answer address the question. *Context precision*: are the relevant chunks ranked near the top of what was retrieved. *Context recall*: did retrieval fetch everything needed to answer. Low faithfulness → generation problem; low recall/precision → retrieval problem.
 
-**43. How would you prove the reranker helps? (not built yet)**
-Run the same evaluation set under four configs — vector only, keyword only, hybrid, hybrid + rerank — and compare context precision/recall and faithfulness. Don't claim improvement without those numbers.
+**43. How would you prove the reranker helps?**
+Run the same evaluation set under four configs — vector only, keyword only, hybrid, hybrid + rerank — and compare context precision/recall and faithfulness. Don't claim improvement without those numbers. We did this: on 12 questions the reranked config had the *lowest* context precision (0.769 vs 0.881 for plain hybrid) and no recall gain, so the data does **not** support "the reranker improves quality" for this contract.
+
+**43b. What did your RAGAS evaluation show overall?**
+Hybrid (RRF) was the most balanced: best precision (0.881), top faithfulness (0.972, tied with vector), recall 0.958. Keyword had the best recall (0.979) but the worst relevancy. Vector alone had the lowest recall (0.896) — e.g. it missed the passage about Sell.Do's missing APIs. Reranking did not help. All gaps are small relative to a 12-question sample.
+
+**43c. Why can't you trust the differences much?**
+Small sample (one question flipping 0→1 moves a mean by 0.083), one run (no variance estimate), same model family as judge and generator, and an answer-relevancy metric that scored correct-but-hedged answers 0.00 and could only generate 1 of its usual 3 questions.
+
+**43d. How did you handle RAGAS returning NaN scores?**
+The first run used RAGAS's default 16 parallel workers and many jobs timed out (6–9 of 12 context-precision scores missing per config), so averages were meaningless. I lowered concurrency to 4 workers with a 300 s timeout and retries; the rerun had zero missing scores. The script also reports a `_missing` count so NaNs can't be silently averaged away.
+
+**43e. Why evaluate offline and not on every user question?**
+Metrics need a reference answer and several LLM-judge calls per sample (it took ~20 minutes and real API cost for 48 answers). It's a regression test for changes to chunking, retrieval or prompts, not a runtime check.
 
 ---
 

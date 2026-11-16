@@ -1,0 +1,154 @@
+config,question,faithfulness,answer_relevancy,context_precision,context_recall,page_hit,pages_retrieved,gold_pages,response
+A_vector_only,What are the payment milestones and their percentages?,1.0,0.9945080030555927,0.99999999995,1.0,1.0,"[10, 10, 10, 9, 7]",[10],"The payment milestones and their corresponding percentages are as follows:
+
+1. Verification + Foundation: 30%
+   - Deliverables: ""UI v0 verified, Zoho Analytics model verified, ingestion contract frozen, production boilerplate ready"".
+
+2. Production Pipeline Live (Configured Projects): 30%
+   - Deliverables: ""End-to-end pipeline for Sell.Do exports + mCube recordings, <Project 1>/<Project 2> locked scoring running, Zoho Analytics ingestion working"".
+
+3. Governance + Ops Intelligence: 30%
+   - Deliverables: ""Admin/RBAC, version control + audit logs, categorisation, scoring suggestion engine (recommend-only), UAT fixes"".
+
+4. Enhancements + Handover + Monitor: 10%
+   - Deliverables: ""Hardening, monitoring dashboards, runbook, handover, stabilization window start""."
+B_keyword_only,What are the payment milestones and their percentages?,1.0,0.9981681141128491,0.9999999999,1.0,1.0,"[10, 10, 10, 15]",[10],"The payment milestones and their percentages are as follows:
+
+1. Verification + Foundation: 30%
+   - Deliverables: ""UI v0 verified, Zoho Analytics model verified, ingestion contract frozen, production boilerplate ready"".
+
+2. Production Pipeline Live (Configured Projects): 30%
+   - Deliverables: ""End-to-end pipeline for Sell.Do exports + mCube recordings, <Project 1>/<Project 2> locked scoring running, Zoho Analytics ingestion working"".
+
+3. Governance + Ops Intelligence: 30%
+   - Deliverables: ""Admin/RBAC, version control + audit logs, categorisation, scoring suggestion engine (recommend-only), UAT fixes"".
+
+4. Enhancements + Handover + Monitor: 10%
+   - Deliverables: ""Hardening, monitoring dashboards, runbook, handover, stabilization window start""."
+C_hybrid_rrf,What are the payment milestones and their percentages?,1.0,0.9945047256810514,0.99999999995,1.0,1.0,"[10, 10, 10, 9, 15]",[10],"The payment milestones and their corresponding percentages are as follows:
+
+1. Verification + Foundation: 30%
+   - Deliverables: ""UI v0 verified, Zoho Analytics model verified, ingestion contract frozen, production boilerplate ready"".
+
+2. Production Pipeline Live (Configured Projects): 30%
+   - Deliverables: ""End-to-end pipeline for Sell.Do exports + mCube recordings, <Project 1>/<Project 2> locked scoring running, Zoho Analytics ingestion working"".
+
+3. Governance + Ops Intelligence: 30%
+   - Deliverables: ""Admin/RBAC, version control + audit logs, categorisation, scoring suggestion engine (recommend-only), UAT fixes"".
+
+4. Enhancements + Handover + Monitor: 10%
+   - Deliverables: ""Hardening, monitoring dashboards, runbook, handover, stabilization window start""."
+D_hybrid_rerank,What are the payment milestones and their percentages?,1.0,0.9945136490468879,0.49999999995,1.0,1.0,"[10, 10, 10, 6, 15]",[10],"The payment milestones and their corresponding percentages are as follows:
+
+1. Verification + Foundation: 30%
+   - Deliverables: UI v0 verified, Zoho Analytics model verified, ingestion contract frozen, production boilerplate ready.
+
+2. Production Pipeline Live (Configured Projects): 30%
+   - Deliverables: End-to-end pipeline for Sell.Do exports + mCube recordings, <Project 1>/<Project 2> locked scoring running, Zoho Analytics ingestion working.
+
+3. Governance + Ops Intelligence: 30%
+   - Deliverables: Admin/RBAC, version control + audit logs, categorisation, scoring suggestion engine (recommend-only), UAT fixes.
+
+4. Enhancements + Handover + Monitor: 10%
+   - Deliverables: Hardening, monitoring dashboards, runbook, handover, stabilization window start."
+A_vector_only,What is the monthly O&M baseline fee and how many calls does it include?,1.0,0.8886453454137739,0.7555555555303703,1.0,1.0,"[11, 12, 11, 11, 11]",[11],"The monthly O&M baseline fee is ""30,000 INR / month"". This fee does not specify a limit on the number of calls included; however, additional charges apply for calls processed beyond the baseline, which are ""5 INR / audited call"". 
+
+Interpretation: The baseline fee covers always-on hosting, monitoring, routine operations, and minor fixes, but the specific number of calls included in the baseline is not defined in the provided passages."
+B_keyword_only,What is the monthly O&M baseline fee and how many calls does it include?,1.0,0.88740965824729,0.9166666666361111,1.0,1.0,"[11, 11, 14, 14, 14]",[11],"The monthly O&M baseline fee is ""30,000 INR / month"" and it includes ""up to 1,000 calls / month""."
+C_hybrid_rrf,What is the monthly O&M baseline fee and how many calls does it include?,1.0,0.8874062335676491,0.99999999995,1.0,1.0,"[11, 11, 12, 14, 14]",[11],"The monthly O&M baseline fee is ""30,000 INR / month"" and it includes ""up to 1,000 calls / month""."
+D_hybrid_rerank,What is the monthly O&M baseline fee and how many calls does it include?,1.0,0.8777767397710635,0.47777777776185176,0.5,1.0,"[14, 12, 11, 14, 11]",[11],"The monthly O&M baseline fee is ₹30,000, and it includes an always-on, production-grade deployment posture that is independent of call volume. The baseline does not scale down with lower usage, meaning it remains fixed regardless of the number of calls processed. 
+
+For additional calls beyond the baseline, there is a variable charge of ₹5 per audited call. The examples provided indicate that the baseline covers up to 1,000 calls per month for the fixed fee of ₹30,000."
+A_vector_only,How much is charged per audited call?,1.0,0.9330742803189582,0.6388888888675925,1.0,1.0,"[11, 12, 11, 11, 14]",[11],The charge per audited call is ₹5.
+B_keyword_only,How much is charged per audited call?,1.0,0.933105350174019,0.9999999999666667,1.0,1.0,"[11, 12, 11, 12, 4]",[11],The charge per audited call is 5 INR.
+C_hybrid_rrf,How much is charged per audited call?,1.0,0.9330743556116653,0.9166666666361111,1.0,1.0,"[11, 12, 11, 11, 14]",[11],"The charge per audited call is ""5 INR / audited call"". This fee applies to each call processed and covers the usage-linked run cost for the audit pipeline."
+D_hybrid_rerank,How much is charged per audited call?,1.0,0.9330846369373118,0.9999999999666667,1.0,1.0,"[12, 11, 11, 14, 14]",[11],The charge per audited call is ₹5.
+A_vector_only,"What would the monthly O&M bill be for 2,000 calls?",1.0,0.9809968741678988,0.8333333332916666,1.0,1.0,"[11, 11, 11, 14, 12]",[11],"The monthly O&M bill for 2,000 calls would be ₹35,000. This is calculated as follows: the baseline charge for 1,000 calls is ₹30,000, and for the additional 1,000 calls, there is a charge of ₹5 per call, resulting in an additional ₹5,000. Therefore, the total is ₹30,000 + ₹5,000 = ₹35,000."
+B_keyword_only,"What would the monthly O&M bill be for 2,000 calls?",1.0,0.980998157145977,0.94999999997625,1.0,1.0,"[11, 11, 11, 14, 14]",[11],"The monthly O&M bill for 2,000 calls would be ₹35,000. This is calculated as follows: the baseline charge for up to 1,000 calls is ₹30,000, and for the additional 1,000 calls, there is a charge of ₹5 per call, resulting in an additional ₹5,000. Therefore, the total is ₹30,000 + ₹5,000 = ₹35,000."
+C_hybrid_rrf,"What would the monthly O&M bill be for 2,000 calls?",1.0,0.9671210472809127,0.9166666666361111,1.0,1.0,"[11, 11, 11, 11, 12]",[11],"The monthly O&M bill for 2,000 calls would be ₹35,000. This is calculated as follows: the baseline charge for up to 1,000 calls is ₹30,000, and for the additional 1,000 calls, there is a charge of ₹5 per call, resulting in an additional ₹5,000. Therefore, the total is ₹30,000 + ₹5,000 = ₹35,000."
+D_hybrid_rerank,"What would the monthly O&M bill be for 2,000 calls?",0.8571428571428571,0.9393655445727068,0.6999999999766667,1.0,1.0,"[11, 12, 14, 14, 11]",[11],"The monthly O&M bill for 2,000 calls would be ₹35,000. This is calculated as follows: the baseline charge is ₹30,000 for the first 1,000 calls, and for the additional 1,000 calls, there is a charge of ₹5 per call, resulting in an additional ₹5,000. Therefore, the total is ₹30,000 + ₹5,000 = ₹35,000."
+A_vector_only,How many total man-hours are estimated for the project?,1.0,0.9487567303747607,0.99999999995,1.0,1.0,"[9, 9, 8, 8, 5]",[9],"The total estimated man-hours for the project are approximately 1,500 hours."
+B_keyword_only,How many total man-hours are estimated for the project?,1.0,0.9466295299147243,0.99999999995,1.0,1.0,"[9, 9, 4, 8, 7]",[9],"The total estimated man-hours for the project is approximately 1,500 hours."
+C_hybrid_rrf,How many total man-hours are estimated for the project?,1.0,0.9466295299147243,0.99999999995,1.0,1.0,"[9, 9, 5, 8, 8]",[9],"The total estimated man-hours for the project is approximately 1,500 hours."
+D_hybrid_rerank,How many total man-hours are estimated for the project?,1.0,0.9530111312948341,0.99999999995,1.0,1.0,"[9, 9, 8, 13, 4]",[9],"The total estimated man-hours for the project are approximately 1,500 hours."
+A_vector_only,What is the total duration of Phase-1?,1.0,0.0,0.499999999975,1.0,1.0,"[6, 8, 3, 7, 5]",[8],"The total duration of Phase-1 is approximately 10-12 weeks, depending on client validation turnaround during specific weeks."
+B_keyword_only,What is the total duration of Phase-1?,1.0,0.0,0.9999999999,1.0,1.0,"[8, 9, 3, 11, 9]",[8],"The total duration of Phase-1 is approximately ""10-12 weeks"" depending on client validation turnaround during specific weeks."
+C_hybrid_rrf,What is the total duration of Phase-1?,1.0,0.0,0.9999999999,1.0,1.0,"[8, 6, 3, 5, 9]",[8],"The total duration of Phase-1 is approximately 10 to 12 weeks, depending on client validation turnaround during specific weeks."
+D_hybrid_rerank,What is the total duration of Phase-1?,1.0,0.0,0.7555555555303703,1.0,1.0,"[8, 6, 7, 13, 3]",[8],"The total duration of Phase-1 is approximately ""10-12 weeks"" depending on client validation turnaround during specific weeks."
+A_vector_only,Why is Phase-1 designed as an export-driven approach?,1.0,0.49916030579208776,0.499999999975,0.0,1.0,"[3, 6, 13, 10, 5]",[3],"Phase-1 is designed as an export-driven approach to ""move fast and reduce integration risk"" while transitioning from Sell.Do to Zoho. This approach aims to deliver ""consistent, evidence-backed QA at scale"" and establish a stable data foundation in Zoho Analytics for daily performance visibility and coaching loops. Additionally, the focus is on completing the remaining ~20% of the core audit engine and utilizing ""export-driven ingestion"" from Sell.Do exports and mCube recordings."
+B_keyword_only,Why is Phase-1 designed as an export-driven approach?,0.9333333333333333,0.49913571729396633,0.7499999999625,1.0,1.0,"[3, 1, 13, 6, 3]",[3],"Phase-1 is designed as an export-driven approach primarily due to the constraints posed by the Sell.Do platform, which lacks developer-friendly APIs/webhooks/SDKs like those offered by Salesforce, Zoho, or HubSpot. This limitation drives the decision to adopt an export-driven production approach, which is characterized as the ""fastest + lowest delivery risk"" method while the client transitions from Sell.Do to Zoho. 
+
+Additionally, the export-driven approach is intended to facilitate rapid movement and minimize integration risks during this transition, allowing for consistent, evidence-backed quality assurance at scale and establishing a stable data foundation in Zoho Analytics for ongoing performance visibility and coaching. 
+
+Overall, the design aims to enable the auditing of approximately 100% of calls and to review performance trends efficiently without relying on manual quality assurance efforts."
+C_hybrid_rrf,Why is Phase-1 designed as an export-driven approach?,1.0,0.49916030579208776,0.7499999999625,1.0,1.0,"[6, 13, 3, 3, 5]",[3],"Phase-1 is designed as an export-driven approach primarily to ""move fast and reduce integration risk"" while XXXXXXXXX Properties Pvt. Ltd. transitions from Sell.Do to Zoho. This design choice is also influenced by the fact that Sell.Do does not provide developer-friendly APIs/webhooks/SDKs, which makes an export-driven approach the ""fastest + lowest delivery risk"" option during the client's migration process. The goal of this approach is to enable QA/Team Leads/Management to audit nearly 100% of calls and review performance trends in Zoho Analytics without relying on manual QA efforts."
+D_hybrid_rerank,Why is Phase-1 designed as an export-driven approach?,1.0,0.49916030579208776,0.6791666666496875,1.0,1.0,"[13, 3, 6, 5, 10]",[3],"Phase-1 is designed as an export-driven approach to ""move fast and reduce integration risk"" while XXXXXXXXX Properties Pvt. Ltd. transitions from Sell.Do to Zoho. This design choice is influenced by the key constraint that ""Sell.Do does not provide developer-friendly APIs/webhooks/SDKs like Salesforce/Zoho/HubSpot,"" making the export-driven approach the ""fastest + lowest delivery risk"" option during the client's migration process. The goal of this approach is to enable QA/Team Leads/Management to audit approximately 100% of calls and review performance trends in Zoho Analytics without relying on manual QA efforts."
+A_vector_only,What is the response target for a P1 (service down) support issue?,1.0,0.9055877898429529,0.9999999999,1.0,1.0,"[13, 14, 12, 11, 12]",[13],"The response target for a P1 (service down) support issue is to ""acknowledge within 2-4 hours""."
+B_keyword_only,What is the response target for a P1 (service down) support issue?,1.0,0.9055987233503012,0.9999999999,1.0,1.0,"[13, 9, 5, 11, 11]",[13],"The response target for a P1 (service down) support issue is to ""acknowledge within 2-4 hours""."
+C_hybrid_rrf,What is the response target for a P1 (service down) support issue?,1.0,0.9370772037343031,0.9999999999,1.0,1.0,"[13, 12, 11, 11, 5]",[13],"The response target for a P1 (service down) support issue is to acknowledge within ""2-4 hours""."
+D_hybrid_rerank,What is the response target for a P1 (service down) support issue?,1.0,0.9055772121562619,0.9999999999,1.0,1.0,"[13, 12, 12, 14, 5]",[13],The response target for a P1 (service down) support issue is to acknowledge within 2-4 hours.
+A_vector_only,What does the monthly O&M baseline cover?,1.0,0.935179250387709,0.499999999975,0.75,1.0,"[12, 11, 11, 14, 14]",[12],"The monthly O&M baseline covers ""always-on hosting + monitoring + routine ops + minor fixes"" and is set at ₹30,000 per month. It is aligned to an ""always-on, production-grade deployment posture, independent of call volume,"" which includes a fixed-performance compute instance, managed PostgreSQL database, and application logs, backups, alerts, and retention. The baseline amount does not scale down with lower usage, as the system runs 24×7 even when no calls are processed."
+B_keyword_only,What does the monthly O&M baseline cover?,1.0,0.9432275568160714,0.8055555555287036,0.75,1.0,"[11, 12, 14, 11, 14]",[12],"The monthly O&M baseline covers ""always-on hosting + monitoring + routine ops + minor fixes"" and is set at ""30,000 INR / month"". It is designed to support an ""always-on, production-grade deployment posture, independent of call volume"". This means that the baseline O&M is a fixed monthly amount that does not decrease with lower usage, as the system operates continuously, even when no calls are processed."
+C_hybrid_rrf,What does the monthly O&M baseline cover?,1.0,0.9351698872923216,0.5833333333041666,1.0,1.0,"[12, 11, 14, 14, 11]",[12],"The monthly O&M baseline covers ""always-on hosting + monitoring + routine ops + minor fixes"" and is set at ₹30,000 per month. It is designed to support an ""always-on, production-grade deployment posture, independent of call volume"". The baseline includes a fixed-performance instance for compute, managed PostgreSQL for the database, and application logs, backups, alerts, and retention for storage and monitoring."
+D_hybrid_rerank,What does the monthly O&M baseline cover?,1.0,0.9358212961634549,0.5833333333041666,1.0,1.0,"[12, 14, 11, 14, 12]",[12],"The monthly O&M baseline covers several aspects related to hosting and operational maintenance. Specifically, it includes:
+
+1. ""Always-on hosting"" which indicates that the system is operational 24/7, regardless of call volume.
+2. ""Monitoring"" which encompasses application logs, backups, alerts, and retention.
+3. ""Routine ops"" which refers to regular operational tasks necessary for maintaining the system.
+4. ""Minor fixes"" which suggests that small issues can be addressed within the scope of the baseline.
+
+The fixed monthly amount for the O&M baseline is ₹30,000."
+A_vector_only,What is the fixed monthly infrastructure cost in the appendix?,1.0,0.8597553599167819,0.99999999995,1.0,1.0,"[14, 14, 14, 11, 12]",[14],"The fixed monthly infrastructure cost is ₹30,000 per month."
+B_keyword_only,What is the fixed monthly infrastructure cost in the appendix?,0.7,0.0,0.8055555555287036,1.0,1.0,"[14, 11, 14, 14, 11]",[14],"The fixed monthly infrastructure cost is ₹25,500 - ₹26,500 per month (approximately $305 - $315) for the total fixed infrastructure operational expenditure (OPEX) when operating 24×7. Additionally, there is a baseline O&M cost of 30,000 INR per month, which covers always-on hosting, monitoring, routine operations, and minor fixes. 
+
+Interpretation: The total fixed infrastructure cost may vary based on the specific operational requirements and the chosen pricing model."
+C_hybrid_rrf,What is the fixed monthly infrastructure cost in the appendix?,1.0,0.9661959238737022,0.8666666666377778,0.5,1.0,"[14, 14, 11, 14, 14]",[14],"The fixed monthly infrastructure cost in the appendix is ₹30,000 per month. This amount is described as the ""Monthly O&M Baseline (Fixed)"" which ""covers always-on hosting + monitoring + routine ops + minor fixes""."
+D_hybrid_rerank,What is the fixed monthly infrastructure cost in the appendix?,0.8,0.8288790206221326,0.9999999999666667,1.0,1.0,"[14, 14, 14, 14, 11]",[14],"The fixed monthly infrastructure cost is ₹30,000 per month. This amount covers always-on hosting, monitoring, routine operations, and minor fixes."
+A_vector_only,What is explicitly out of scope for Phase-1?,1.0,0.903485463733359,0.7499999999625,1.0,1.0,"[5, 13, 3, 6, 5]",[5],"Explicitly out of scope for Phase-1 includes the following items:
+
+1. ""Direct Sell.Do API integration / webhooks (blocked by platform limitation; export method only)""
+2. ""Full Zoho CRM migration execution (client program; not part of apeXaudit build)""
+3. ""Deep enterprise features: SSO/SAML, advanced governance, fine-grained RBAC policies (beyond basic roles)""
+4. ""Automated ingestion from email/WhatsApp/Slack""
+5. ""Real-time streaming (near-zero latency) dashboards""
+6. ""Multi-tenant productization (this is client-specific deployment)""
+7. ""Complex 'agentic optimization' workflows beyond auditing (autonomous coaching plans, automated escalations, etc.)"" 
+
+These exclusions are explicitly stated in the contract passage."
+B_keyword_only,What is explicitly out of scope for Phase-1?,1.0,0.7650985834985686,0.499999999975,1.0,1.0,"[13, 5, 5, 3, 11]",[5],"The following items are explicitly out of scope for Phase-1:
+
+1. ""Direct Sell.Do API integration / webhooks (blocked by platform limitation; export method only)""
+2. ""Full Zoho CRM migration execution (client program; not part of apeXaudit build)""
+3. ""Deep enterprise features: SSO/SAML, advanced governance, fine-grained RBAC policies (beyond basic roles)""
+4. ""Automated ingestion from email/WhatsApp/Slack""
+5. ""Real-time streaming (near-zero latency) dashboards""
+6. ""Multi-tenant productization (this is client-specific deployment)""
+7. ""Complex 'agentic optimization' workflows beyond auditing (autonomous coaching plans, automated escalations, etc.)"".
+
+Additionally, new feature development beyond the agreed Phase-1 scope, near real-time Zoho CRM integration/webhook streaming flows (which is a Phase-2 topic), new dashboards beyond the agreed baseline set, and major re-architecture (such as multi-region, multi-tenant, enterprise SSO, etc.) are also excluded from Phase-1."
+C_hybrid_rrf,What is explicitly out of scope for Phase-1?,1.0,0.9190511280721129,0.699999999965,1.0,1.0,"[5, 13, 5, 3, 3]",[5],"Explicitly out of scope for Phase-1 includes the following items:
+
+1. ""Direct Sell.Do API integration / webhooks (blocked by platform limitation; export method only)""
+2. ""Full Zoho CRM migration execution (client program; not part of apeXaudit build)""
+3. ""Deep enterprise features: SSO/SAML, advanced governance, fine-grained RBAC policies (beyond basic roles)""
+4. ""Automated ingestion from email/WhatsApp/Slack""
+5. ""Real-time streaming (near-zero latency) dashboards""
+6. ""Multi-tenant productization (this is client-specific deployment)""
+7. ""Complex 'agentic optimization' workflows beyond auditing (autonomous coaching plans, automated escalations, etc.)"" 
+
+These exclusions are detailed in the passage from Section 4, ""Out-of-Scope (Phase-1)""."
+D_hybrid_rerank,What is explicitly out of scope for Phase-1?,0.8888888888888888,0.7269783165515219,0.699999999965,1.0,1.0,"[5, 13, 3, 5, 6]",[5],"The following items are explicitly out of scope for Phase-1:
+
+1. ""Direct Sell.Do API integration / webhooks (blocked by platform limitation; export method only)""
+2. ""Full Zoho CRM migration execution (client program; not part of apeXaudit build)""
+3. ""Deep enterprise features: SSO/SAML, advanced governance, fine-grained RBAC policies (beyond basic roles)""
+4. ""Automated ingestion from email/WhatsApp/Slack""
+5. ""Real-time streaming (near-zero latency) dashboards""
+6. ""Multi-tenant productization (this is client-specific deployment)""
+7. ""Complex 'agentic optimization' workflows beyond auditing (autonomous coaching plans, automated escalations, etc.)"" 
+
+These exclusions are detailed in the contract passage."
+A_vector_only,What happens to the score when a fatal error is detected?,0.6666666666666666,1.0,0.9999999999,1.0,1.0,"[7, 7, 4, 8, 4]","[7, 10]","When a fatal error is detected, the score is set to zero. This is specified in the contract passage stating, ""Fatal bypass rule (any fatal → score = 0)""."
+B_keyword_only,What happens to the score when a fatal error is detected?,0.6666666666666666,0.8023435769925986,0.7555555555303703,1.0,1.0,"[3, 4, 7, 4, 3]","[7, 10]","When a fatal error is detected, the score is set to zero. This is specified in the contract passage stating, ""Fatal bypass rule (any fatal → score = 0)""."
+C_hybrid_rrf,What happens to the score when a fatal error is detected?,0.6666666666666666,0.6996548192205013,0.8333333332916666,1.0,1.0,"[7, 4, 3, 7, 4]","[7, 10]","When a fatal error is detected, the score is set to zero. This is explicitly stated in the contract: ""Fatal bypass rule (any fatal → score = 0)""."
+D_hybrid_rerank,What happens to the score when a fatal error is detected?,1.0,0.6947610775208449,0.8333333332916666,1.0,1.0,"[3, 4, 7, 4, 4]","[7, 10]","When a fatal error is detected, the score is set to zero. This is specified in the passage stating, ""Fatal bypass rule (any fatal → score = 0)""."

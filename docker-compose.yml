@@ -71,6 +71,20 @@ services:
     depends_on:
       - api
 
+  eval:
+    profiles: ["eval"]                    # not started by a plain `docker compose up`
+    build:
+      context: .
+      dockerfile: Dockerfile.eval
+    command: python -m app.evaluation.evaluate
+    env_file: .env
+    volumes:
+      - .:/app
+      - model_cache:/root/.cache
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
 volumes:
   model_cache:
   pgdata:
