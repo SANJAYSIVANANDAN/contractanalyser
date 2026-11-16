@@ -2,11 +2,12 @@ from fastapi import Depends, FastAPI
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.api import documents
+from app.api import chat, documents
 from app.db.database import get_db
 
 app = FastAPI(title="DocuPilot AI")
 app.include_router(documents.router)
+app.include_router(chat.router)
 
 
 @app.get("/health")

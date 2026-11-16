@@ -3,6 +3,7 @@
 We use Docling's structured document (not Markdown) because only the structured
 document knows which PDF page each piece of text came from (item.prov[].page_no).
 """
+import html
 
 # Labels we skip: running headers/footers/page numbers add noise, not contract content.
 SKIP_LABELS = {"page_header", "page_footer"}
@@ -46,7 +47,7 @@ def parse_pdf(file_path: str) -> list[dict]:
             text = item.export_to_markdown(doc=document)
         else:
             text = getattr(item, "text", "") or ""
-        text = text.strip()
+        text = html.unescape(text).strip()   # Docling's table export leaves "&amp;" in the text
         if not text:
             continue
 
