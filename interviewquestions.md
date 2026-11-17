@@ -114,10 +114,16 @@ It dampens the gap between rank 1 and rank 2 so no single list dominates; 60 is 
 Embeddings (bi-encoder) encode query and passage separately: fast, precomputable, rough. A cross-encoder reads them together: much more precise but must run per pair, so we only run it on ~15 candidates.
 
 **34. Why can't "no results" signal "no evidence"?**
-Vector search always returns its nearest neighbours, even for "capital of France". So we added a rerank-score floor (−9.0): answerable questions scored ≥ −7.34, unanswerable ≤ −10.21 in our test.
+Vector search always returns its nearest neighbours, even for "capital of France", so an empty result can't mean "no evidence". We first added a rerank-score floor (−9.0) — but see Q35.
 
-**35. What are the weaknesses of that floor?**
-It was calibrated on 15 questions and one document. Scores are raw logits and can shift with document type, so it needs recalibration — ideally against an evaluation set.
+**35. What went wrong with the score floor, and what replaced it?**
+It was calibrated on specific factual questions and then rejected every broad question a user asks: "Summarize this agreement" scored −10.3 and "Who are the parties?" −10.1, the same as a clause the document doesn't contain (−11.2). No threshold can separate those, so every such question came back "Insufficient evidence". We removed the floor: the model now decides (strict prompt + one explanatory sentence), citation validation still guarantees claims point at real passages, and summary-type questions take a separate graph branch that samples passages across the whole document. Trade-off: borderline questions can vary between runs.
+
+**35b. Why does "summarize" need a different retrieval path?**
+A summary needs coverage of the whole document, but search returns the few passages that best match the question's words. `summary_retrieve` picks up to 16 passages spaced evenly in reading order (skipping tiny heading chunks), so the summary can cite pages 3–14 instead of one corner of the document.
+
+**35c. You saw an OpenAI "peer closed connection" error. What did you do?**
+It was an `httpx.RemoteProtocolError` — the connection dropped mid-stream, which the SDK's built-in retry doesn't cover once streaming has begun — and it surfaced as a 502. I measured the connection afterwards (40/40 calls ok, so it was transient, not systematic), then added retries: `/chat` retries the pipeline up to 3×; `/chat/stream` retries only if no text has been sent yet, because retrying after would show repeated text. Otherwise it emits an `error` event. I verified the retry with a simulated failure; I can't claim it was a real-world fix since the drop hasn't recurred.
 
 **36. How do you prevent fabricated citations?**
 The LLM only writes `[n]` markers. The backend rejects numbers it didn't send, then builds every citation field (filename, page, section, excerpt, chunk ID) from database rows. The model never supplies a page number or excerpt.
@@ -215,13 +221,13 @@ Raise worker resources, split into page-range subtasks, add task time limits, st
 RabbitMQ down: uploads can save the file/row but publishing fails (the row stays `PENDING`; it needs a re-publish mechanism — a real gap). Redis down: the worker's lock call raises *before* the task's `try` block, so the task errors without retrying and the document stays `PENDING` (another gap — the lock acquisition should be handled; later the cache should degrade gracefully). OpenAI down: ingestion retries then `FAILED`; chat returns 502 / `event: error`.
 
 **58. What are this system's main limitations?**
-Single-turn answers; floor calibrated on one document; compare-two-contracts isn't balanced per document; no OCR; no auth or per-user isolation; excerpts are chunk starts, not exact sentences; the retry path for OpenAI errors hasn't been exercised under a real outage.
+Single-turn answers; no relevance cutoff, so borderline questions can vary between runs; the summary trigger is a keyword regex; compare-two-contracts isn't balanced per document; no OCR; no auth or per-user isolation; excerpts are chunk starts, not exact sentences; the OpenAI retry was tested with a simulated drop, not a real outage; clause/risk analysis (a dedicated feature) isn't built.
 
 ---
 
 ## F. 60-second pitch (practise this)
 
-"DocuPilot is a contract Q&A system where every answer is cited and the citations can't be faked. Uploads go to FastAPI, which saves the PDF, writes a row, and publishes only the document ID to RabbitMQ. A Celery worker converts the PDF with Docling, keeping real page numbers, chunks it without crossing pages or sections, embeds with OpenAI, and stores everything in PostgreSQL with pgvector in one transaction, guarded by a Redis lock so retries don't duplicate data. At question time a LangGraph pipeline runs hybrid retrieval — vectors plus full-text search merged with Reciprocal Rank Fusion — reranks locally with a cross-encoder, and uses a score floor to decide whether there's any evidence. GPT-4o-mini answers from numbered passages, and the backend validates each citation and builds it from database rows, so the model can't invent a page or filename. Answers stream over SSE, with citations arriving only after validation."
+"DocuPilot is a contract Q&A system where every answer is cited and the citations can't be faked. Uploads go to FastAPI, which saves the PDF, writes a row, and publishes only the document ID to RabbitMQ. A Celery worker converts the PDF with Docling, keeping real page numbers, chunks it without crossing pages or sections, embeds with OpenAI, and stores everything in PostgreSQL with pgvector in one transaction, guarded by a Redis lock so retries don't duplicate data. At question time a LangGraph pipeline runs hybrid retrieval — vectors plus full-text search merged with Reciprocal Rank Fusion — reranks locally with a cross-encoder, and summary-style questions take a separate path that samples the whole document. GPT-4o-mini answers from numbered passages, and the backend validates each citation and builds it from database rows, so the model can't invent a page or filename. Answers stream over SSE, with citations arriving only after validation."
 
 ---
 

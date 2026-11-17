@@ -1,7 +1,10 @@
 import json
 import logging
+import time
 import uuid
 
+import httpx
+import openai
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
@@ -14,6 +17,23 @@ from app.services.rag import rag_graph, run_rag
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["chat"])
+
+# Temporary network problems talking to OpenAI (dropped connection, timeout). Worth retrying.
+# httpx.TransportError covers "peer closed connection ... incomplete chunked read".
+TRANSIENT_ERRORS = (httpx.TransportError, openai.APIConnectionError, openai.APITimeoutError)
+MAX_ATTEMPTS = 3
+
+
+def run_rag_with_retry(db: Session, question: str, document_ids: list[uuid.UUID]):
+    """Run the whole pipeline, retrying if the connection to OpenAI drops."""
+    for attempt in range(1, MAX_ATTEMPTS + 1):
+        try:
+            return run_rag(db, question, document_ids)
+        except TRANSIENT_ERRORS as error:
+            logger.warning("OpenAI connection problem (attempt %d/%d): %s", attempt, MAX_ATTEMPTS, type(error).__name__)
+            if attempt == MAX_ATTEMPTS:
+                raise
+            time.sleep(attempt)   # wait 1 s, then 2 s
 
 
 def resolve_document_ids(db: Session, requested: list[uuid.UUID]) -> list[uuid.UUID]:
@@ -56,7 +76,7 @@ def chat(request: ChatRequest, db: Session = Depends(get_db)):
     conversation = get_or_create_conversation(db, request)
 
     try:
-        state = run_rag(db, request.question, document_ids) if document_ids else None
+        state = run_rag_with_retry(db, request.question, document_ids) if document_ids else None
     except Exception as e:
         logger.exception("RAG pipeline failed")
         raise HTTPException(502, f"Answer generation failed: {type(e).__name__}")
@@ -95,19 +115,30 @@ def chat_stream(request: ChatRequest):
 
             streamed_any_token = False
             final_state = None
-            # stream_mode "messages" = LLM tokens as they arrive; "values" = full state after each node
-            for mode, payload in rag_graph.stream(
-                {"question": request.question, "document_ids": document_ids},
-                config={"configurable": {"db": db}},
-                stream_mode=["messages", "values"],
-            ):
-                if mode == "messages":
-                    token, metadata = payload
-                    if metadata.get("langgraph_node") == "generate" and token.content:
-                        streamed_any_token = True
-                        yield sse("token", {"text": token.content})
-                else:
-                    final_state = payload
+            for attempt in range(1, MAX_ATTEMPTS + 1):
+                try:
+                    # stream_mode "messages" = LLM tokens as they arrive; "values" = full state after each node
+                    for mode, payload in rag_graph.stream(
+                        {"question": request.question, "document_ids": document_ids},
+                        config={"configurable": {"db": db}},
+                        stream_mode=["messages", "values"],
+                    ):
+                        if mode == "messages":
+                            token, metadata = payload
+                            if metadata.get("langgraph_node") == "generate" and token.content:
+                                streamed_any_token = True
+                                yield sse("token", {"text": token.content})
+                        else:
+                            final_state = payload
+                    break   # finished without a connection problem
+                except TRANSIENT_ERRORS as error:
+                    logger.warning("OpenAI connection problem (attempt %d/%d): %s", attempt, MAX_ATTEMPTS, type(error).__name__)
+                    # Retrying after text has already reached the client would repeat that text,
+                    # so we only retry while nothing has been sent yet.
+                    if streamed_any_token or attempt == MAX_ATTEMPTS:
+                        raise
+                    final_state = None
+                    time.sleep(attempt)
 
             if final_state is None or "answer" not in final_state:
                 yield sse("error", {"message": "The pipeline produced no answer."})

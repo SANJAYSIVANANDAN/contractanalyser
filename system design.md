@@ -118,16 +118,20 @@ Measured on the sample 15-page PDF: 74 chunks, pages 1–15, all with vectors; 1
 `POST /chat` and `POST /chat/stream` ([api/chat.py](app/api/chat.py)) run the LangGraph pipeline in [services/rag.py](app/services/rag.py):
 
 ```
-START → retrieve → rerank ──(no passage above score floor)──► insufficient ──► END
-                      │
-                      └──(passages found)──► generate → validate_citations ──► END
+START ──(specific question)──► retrieve → rerank ──(no candidates at all)──► insufficient ──► END
+  │                                           │
+  │                                           └──(candidates)──► generate → validate_citations ──► END
+  │                                                                  ▲
+  └──(summary / overview question)──► summary_retrieve ──────────────┘
 ```
 
 | Node | What it does |
 |---|---|
 | `retrieve` | `hybrid_retrieve`: embed the question, run semantic + keyword search over the selected documents, merge with RRF → up to 15 candidates. |
-| `rerank` | CrossEncoder scores each (question, passage); keep top 5 **with score ≥ `MIN_RERANK_SCORE` (−9.0)**. |
-| conditional edge | No passage above the floor → `insufficient`; otherwise → `generate`. |
+| `rerank` | CrossEncoder scores each (question, passage); keep the best 5. **No score cutoff** (see section 6). |
+| start edge | Questions matching "summarize / summary / overview / what is this document about…" go to `summary_retrieve`; everything else to `retrieve`. |
+| `summary_retrieve` | Instead of search hits, take up to 16 passages spread evenly across each document in reading order (skipping tiny heading chunks), so a summary covers the whole document. |
+| conditional edge | Only if retrieval returned nothing at all → `insufficient`; otherwise → `generate`. |
 | `generate` | LangChain `prompt | ChatOpenAI(gpt-4o-mini, temperature 0)`. Passages are numbered `[1]..[5]`. |
 | `validate_citations` | Backend check of every `[n]` in the answer (see section 7). |
 | `insufficient` | Fixed "Insufficient evidence…" answer, empty citations. |
@@ -163,16 +167,20 @@ Only ranks are used, never raw scores — cosine distance and `ts_rank` are on d
 
 Measured: cold lookup 0.605 s → cached 0.019 s. Over HTTP the total request is ≈ 3–4 s either way, because the LLM call dominates and is intentionally not cached. The cache saves ≈ 0.6 s and an embedding call per repeated question.
 
-**Rerank + score floor.** Embeddings encode question and passage separately (fast, rough). A cross-encoder reads them together (slow, precise), so it only runs on the ~15 RRF candidates. Its scores are raw logits, not probabilities.
+**Reranking.** Embeddings encode question and passage separately (fast, rough). A cross-encoder reads them together (slow, precise), so it only runs on the ~15 RRF candidates and keeps the best 5. Its scores are raw logits, not probabilities.
 
-**Why a score floor is necessary.** Vector search *always* returns its nearest neighbours, even for "What is the capital of France?". An empty result therefore can't signal "no evidence". Calibration run on this document (15 questions):
+**Why there is no relevance-score cutoff (a bug we hit and fixed).** Vector search *always* returns its nearest neighbours, so "no results" can't signal "no evidence". We first added a rerank-score floor (−9.0), calibrated on specific factual questions. It then rejected **every broad question** a user would naturally ask, because those score as low as questions the document truly can't answer:
 
-| Question type | Top rerank score |
+| Question | Best rerank score |
 |---|---|
-| Answerable (8 questions) | −7.34 … +5.89 |
-| Not in the document (7 questions) | −11.27 … −10.21 |
+| Summarize this agreement | −10.3 |
+| Who are the parties to this agreement | −10.1 |
+| Is there a confidentiality clause (not in the document) | −11.2 |
+| What are the payment milestones | +5.7 |
 
-The floor of −9.0 sits in the gap. This is a small sample on one document — recalibrate when contract types change.
+No threshold separates "broad but answerable" from "absent", so the floor was removed. Instead: (1) the **model** decides whether the passages are enough, using the strict system prompt ("Insufficient evidence: …" plus one sentence saying what wasn't found); (2) **citation validation** guarantees any claim points at a passage we actually sent; (3) broad questions get the **summary path** above. Re-tested after the change: summarize → 9 citations across pages 3–14; parties, "what is this about" → answered with citations; termination, governing law, indemnification, "capital of France" → refused with an explanation.
+
+Trade-off: with no hard gate, a borderline question can be answered or refused depending on the run (observed: "key risks" was refused once and answered with 3 citations another time). Answers are still limited to cited passages, but the refusal decision is the model's, not a measurable threshold.
 
 ---
 
@@ -195,7 +203,7 @@ Tested with fabricated model outputs ([tests/test_citations.py](tests/test_citat
 
 Code: [dataset.py](app/evaluation/dataset.py) (12 hand-written questions, each reference answer checked against the contract text and tagged with the gold page) and [evaluate.py](app/evaluation/evaluate.py). Run offline only: `docker compose --profile eval run --rm eval` (separate image, ~20 min, small OpenAI cost). Results are saved to `app/evaluation/results/` as JSON and CSV.
 
-For each question, four configurations each retrieve 5 passages: **A** vector only, **B** keyword only, **C** hybrid (RRF), **D** hybrid + CrossEncoder rerank (production score floor *not* applied, so D is judged on ranking only). The same prompt and model generate each answer; RAGAS (judge: gpt-4o-mini) scores it.
+For each question, four configurations each retrieve 5 passages: **A** vector only, **B** keyword only, **C** hybrid (RRF), **D** hybrid + CrossEncoder rerank (judged on ranking quality alone). The same prompt and model generate each answer; RAGAS (judge: gpt-4o-mini) scores it.
 
 | Metric | What it measures | Low value points to |
 |---|---|---|
@@ -215,7 +223,7 @@ For each question, four configurations each retrieve 5 passages: **A** vector on
 
 **What the results do and don't show**
 - No configuration wins on every metric. Hybrid (C) has the best precision, ties for the best faithfulness, and has near-best recall. Keyword (B) has the best recall but the worst answer relevancy and faithfulness.
-- **The reranker is not shown to help.** D has the lowest precision and no recall gain over C, so the claim "reranking improves quality" is **not supported** by this data. (In production the reranker's other job — the score floor that detects "no evidence" — is separate and tested in section 6.)
+- **The reranker is not shown to help.** D has the lowest precision and no recall gain over C, so the claim "reranking improves quality" is **not supported** by this data. (This evaluation only measures answer quality for questions the contract can answer.)
 - Hybrid's value shows up per question: on "Why is Phase-1 export-driven?" vector search had context recall 0.0 (it retrieved headings containing "Export-Driven" but not the passage about Sell.Do's missing APIs), while keyword and hybrid scored 1.0.
 - **Small sample.** With 12 questions, one question flipping from 0 to 1 moves a mean by 0.083. Most gaps above are within that noise; treat the table as a baseline, not a ranking.
 
@@ -256,6 +264,7 @@ SSE choice: the stream is one-directional (server → client), works over plain 
 | Scanned PDF (no text layer) | `FAILED: no text extracted` — OCR is off (deferred) |
 | Lock holder crashes | Lock expires after 1800 s (TTL) |
 | Client disconnects mid-stream | Generator stops; nothing half-finished is stored |
+| OpenAI connection drops mid-answer (`httpx.RemoteProtocolError: peer closed connection … incomplete chunked read`) | Seen once in testing (it produced a 502). `/chat` now retries the whole pipeline up to 3× (1 s, 2 s pauses). `/chat/stream` retries only while no text has been sent (retrying after would repeat text on screen); otherwise it sends `event: error`. The retry logic was tested with a simulated drop; a real drop has not recurred since. 40/40 direct OpenAI calls and 8/8 streamed chats succeeded afterwards. |
 | Redis down during chat | Cache skipped with a warning; answer still returned (tested). Ingestion is **not** protected: the worker's lock call fails before its `try` block, leaving the document `PENDING` (known gap) |
 | Stale cache after delete/reprocess | Entries for that document are removed (tested: 3 keys → 0 after reprocess) |
 | OpenAI failure during chat | `/chat` → 502; stream → `event: error` |
@@ -287,7 +296,7 @@ SSE choice: the stream is one-directional (server → client), works over plain 
 
 ## 12. Known limitations
 
-1. Rerank floor calibrated on one document (see section 6).
+1. No relevance cutoff: whether the passages suffice is decided by the model (section 6), so borderline questions can vary between runs. The summary trigger is a keyword regex, not real intent detection.
 2. Compare-two-contracts works only as "retrieve across both documents"; top-5 may come mostly from one document. No per-document balancing yet.
 3. Many small chunks (one per section) — safe for citations, noisy for retrieval; merging small neighbours is a possible tweak.
 4. Table chunks are Markdown with `|` characters.
@@ -318,7 +327,7 @@ SSE choice: the stream is one-directional (server → client), works over plain 
 | 13 | GPT-4o-mini generates grounded answers | ✅ tested |
 | 14 | Every factual answer has validated citations | ✅ tested (live + fabricated-output unit tests) |
 | 15 | Citation filename/page come from DB metadata | ✅ tested |
-| 16 | Unsupported questions → insufficient evidence | ✅ tested (termination, off-topic) |
+| 16 | Unsupported questions → insufficient evidence | ✅ re-tested after removing the score floor (termination, governing law, indemnification, off-topic all refused with an explanation). Note: "key risks" varied between runs. |
 | 17 | SSE streams the response | ✅ tested (51 token events → citations → done) |
 | 18 | Redis caches retrieval results | ✅ tested (MISS → HIT → HIT for a repeated/normalized question, TTL ≈ 600 s, invalidation on reprocess) |
 | 19 | Streamlit displays answer and citations | ✅ tested headlessly with Streamlit `AppTest` against the live API (answer, source blocks with filename and page, insufficient-evidence warning). **Not checked visually in a browser.** |
@@ -369,4 +378,4 @@ Open http://localhost:8502 for the UI. Host ports are shifted (8502/8001/5433/56
 
 ## 15. 60-second interview pitch
 
-"DocuPilot is a contract Q&A system where every answer is cited and the citations can't be faked. Uploads go to a FastAPI service that saves the PDF, writes a row, and publishes just the document ID to RabbitMQ, returning in a fraction of a second. A separate Celery worker converts the PDF with Docling, which keeps real page numbers, chunks it so no chunk crosses a page or section, embeds the chunks with OpenAI, and stores them in PostgreSQL with pgvector — all in one transaction, guarded by a Redis lock so retries never duplicate data. At question time a LangGraph pipeline runs hybrid retrieval — pgvector semantic search plus PostgreSQL full-text search merged with Reciprocal Rank Fusion — then a local cross-encoder reranks the candidates, and a score floor decides whether there's any evidence at all. GPT-4o-mini answers using numbered passages, and then the backend validates every citation number and builds the citation objects from database rows, so the model can't invent a page or a filename. Answers stream to the client over SSE, and the citations arrive only after validation."
+"DocuPilot is a contract Q&A system where every answer is cited and the citations can't be faked. Uploads go to a FastAPI service that saves the PDF, writes a row, and publishes just the document ID to RabbitMQ, returning in a fraction of a second. A separate Celery worker converts the PDF with Docling, which keeps real page numbers, chunks it so no chunk crosses a page or section, embeds the chunks with OpenAI, and stores them in PostgreSQL with pgvector — all in one transaction, guarded by a Redis lock so retries never duplicate data. At question time a LangGraph pipeline runs hybrid retrieval — pgvector semantic search plus PostgreSQL full-text search merged with Reciprocal Rank Fusion — then a local cross-encoder reranks the candidates, and summary-style questions take a separate path that samples the whole document. GPT-4o-mini answers using numbered passages, and then the backend validates every citation number and builds the citation objects from database rows, so the model can't invent a page or a filename. Answers stream to the client over SSE, and the citations arrive only after validation."
