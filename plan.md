@@ -46,7 +46,7 @@ Phase 1 execution therefore = review those files, run them, verify.
 ## Key design decisions
 - Worker receives only `document_id`; PDFs on shared Docker volume.
 - Citations built in backend from DB metadata; LLM only picks chunk IDs.
-- LangChain/LangGraph (added at user's request, reversing the original "avoid" instruction) orchestrate generation only, not retrieval.
+- LangChain/LangGraph (added at user's request, reversing the original "avoid" instruction) run the question-answering flow only (one file, `rag.py`); the search logic itself stays plain Python/SQL.
 - Alembic owns schema; no `create_all` in production path.
 - Pin dependency versions; add heavy deps (celery, docling, sentence-transformers, openai, redis, streamlit, ragas) only in the phase that needs them. Worker image is separate/heavier than API image (torch).
 
