@@ -9,7 +9,20 @@ from app.services.rag import validate_citations_node
 
 db = SessionLocal()
 chunks = list(db.scalars(select(Chunk).order_by(Chunk.chunk_index).limit(2)))
-state_base = {"top_chunks": [(chunks[0], 0.0), (chunks[1], 0.0)]}   # we "sent" passages 1 and 2
+# validate_citations_node reads the plain-dict snapshot generate_node would have built
+# (see rag.py) - never live Chunk objects, since that's what persisted RagState holds.
+all_passages = [
+    {
+        "chunk_id": str(c.id),
+        "document_id": str(c.document_id),
+        "filename": c.document.filename,
+        "page_number": c.page_number,
+        "section_title": c.section_title,
+        "content": c.content,
+    }
+    for c in chunks
+]
+state_base = {"all_passages": all_passages}   # we "sent" passages 1 and 2
 
 
 def run(raw):

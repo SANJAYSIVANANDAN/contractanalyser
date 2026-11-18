@@ -1,9 +1,9 @@
 import uuid
 
 import openai
-from sqlalchemy import delete, func
+from sqlalchemy import delete
 
-from app.db.database import SessionLocal
+from app.db.database import SessionLocal, init_db
 from app.db.models import COMPLETED, FAILED, PENDING, PROCESSING, Chunk, Clause, Document
 from app.services.cache import acquire_lock, invalidate_document, release_lock
 from app.services.chunker import chunk_blocks
@@ -12,6 +12,8 @@ from app.services.document_parser import parse_pdf
 from app.services.embeddings import embed_texts
 from app.services.observability import flush as flush_traces
 from app.workers.celery_app import celery_app
+
+init_db()  # the worker writes to the same tables as the API; make sure they exist here too
 
 # Temporary problems worth retrying. Anything else (bad PDF, bug) fails immediately.
 RETRYABLE = (
@@ -59,7 +61,7 @@ def process_document(self, document_id: str):
 
         # --- slow work happens OUTSIDE any open write transaction ---
         blocks = parse_pdf(doc.file_path)           # Docling
-        chunks = chunk_blocks(blocks)               # page-aware chunks
+        chunks = chunk_blocks(blocks)                # structure-aware, overlapping chunks
         # Embed "section title + content" so headings help retrieval; we store only the content.
         texts = [f"{c['section_title'] or ''}\n{c['content']}".strip() for c in chunks]
         vectors = embed_texts(texts)                # OpenAI
@@ -75,8 +77,8 @@ def process_document(self, document_id: str):
                     content=chunk["content"],
                     page_number=chunk["page_number"],
                     section_title=chunk["section_title"],
+                    is_table=chunk["is_table"],
                     embedding=vector,
-                    search_vector=func.to_tsvector("english", chunk["content"]),
                 )
             )
         doc.status = COMPLETED

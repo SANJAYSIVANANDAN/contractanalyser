@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 class ChatRequest(BaseModel):
     question: str = Field(min_length=3, max_length=2000)
-    # Which documents to search. Empty list = search all COMPLETED documents.
+    # Which documents to search. Empty list = search all of the current user's COMPLETED documents.
     document_ids: list[uuid.UUID] = []
     # Omit to start a new conversation.
     conversation_id: uuid.UUID | None = None
@@ -38,4 +38,12 @@ class MessageOut(BaseModel):
     role: str
     content: str
     citations: list | None
+    created_at: datetime
+
+
+class ConversationOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    title: str | None
     created_at: datetime

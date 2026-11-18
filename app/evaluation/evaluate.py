@@ -1,20 +1,24 @@
-"""Offline RAGAS evaluation of four retrieval configurations.
+"""Offline RAGAS evaluation of five retrieval configurations.
 
 Run (costs a small amount of OpenAI usage; do NOT run per user question):
-    docker compose --profile eval run --rm eval
+    docker compose run --rm api python -m app.evaluation.evaluate
 
 What it does, for every question in dataset.py:
     1. Retrieve 5 passages with each configuration:
-         A. vector search only
-         B. keyword search only
-         C. hybrid search with RRF
-         D. hybrid search + local CrossEncoder reranking
+         A. vector (pgvector) search only
+         B. BM25 search only
+         C. hybrid search (vector + BM25) with RRF
+         D. hybrid search + cross-encoder reranking (blended with the RRF rank)
+         E. hybrid + reranking + lightweight jargon query rewriting
     2. Generate an answer from those passages with the SAME prompt/model the app uses.
     3. Score question / passages / answer / reference with RAGAS.
 Results go to app/evaluation/results/ as JSON (summary + details) and CSV (one row per question).
 
-Evaluation note: the production score floor (MIN_RERANK_SCORE) is NOT applied here, so that
-configuration D is judged on ranking quality alone.
+Historical baseline (frozen, from the previous Postgres-FTS-based pipeline, see
+app/evaluation/results/ragas_20261116_115547.json): best was hybrid RRF without rerank
+at faithfulness .972 / relevancy .807 / precision .881 / recall .958; the old reranker
+made every metric worse. This rebuild's bar: some config here should beat that, and D/E
+(reranked) should beat C (not reranked) - proving the new reranker is additive.
 """
 import csv
 import json
@@ -30,12 +34,13 @@ from app.db.database import SessionLocal
 from app.db.models import COMPLETED, Document
 from app.evaluation.dataset import EVAL_SET
 from app.services.embeddings import embed_query
+from app.services.query_rewrite import rewrite_query
 from app.services.rag import NO_EVIDENCE_ANSWER, generate_node
 from app.services.reranker import rerank
-from app.services.retrieval import keyword_search, reciprocal_rank_fusion, semantic_search
+from app.services.retrieval import FUSION_TOP_N, bm25_search, reciprocal_rank_fusion, semantic_search
 
 TOP_N = 5
-CONFIG_NAMES = ["A_vector_only", "B_keyword_only", "C_hybrid_rrf", "D_hybrid_rerank"]
+CONFIG_NAMES = ["A_vector_only", "B_bm25_only", "C_hybrid_rrf", "D_hybrid_rerank", "E_hybrid_rerank_query_rewrite"]
 RESULTS_DIR = os.path.join(os.path.dirname(__file__), "results")
 NO_PASSAGES = "(no passages were retrieved)"
 
@@ -43,26 +48,41 @@ NO_PASSAGES = "(no passages were retrieved)"
 # ------------------------------------------------------------------ step 1: retrieval
 def retrieve_for_all_configs(db, question, document_ids):
     """Returns {config_name: [Chunk, ...]} with at most TOP_N chunks each."""
-    semantic = semantic_search(db, embed_query(question), document_ids)   # 15 candidates
-    keyword = keyword_search(db, question, document_ids)                  # 15 candidates
-    fused = reciprocal_rank_fusion([semantic, keyword], top_n=15)
+    semantic = semantic_search(db, embed_query(question), document_ids)
+    sparse = bm25_search(db, question, document_ids)
+    fused = reciprocal_rank_fusion([semantic, sparse], top_n=FUSION_TOP_N)
     fused_chunks = [chunk for chunk, _score in fused]
+    rrf_scores = {chunk.id: score for chunk, score in fused}
+
+    rewritten = rewrite_query(question)
+    if rewritten != question:
+        semantic_rw = semantic_search(db, embed_query(rewritten), document_ids)
+        sparse_rw = bm25_search(db, rewritten, document_ids)
+        fused_rw = reciprocal_rank_fusion([semantic_rw, sparse_rw], top_n=FUSION_TOP_N)
+    else:
+        fused_rw = fused
+    rrf_scores_rw = {chunk.id: score for chunk, score in fused_rw}
+
     return {
         "A_vector_only": semantic[:TOP_N],
-        "B_keyword_only": keyword[:TOP_N],
+        "B_bm25_only": sparse[:TOP_N],
         "C_hybrid_rrf": fused_chunks[:TOP_N],
-        "D_hybrid_rerank": [chunk for chunk, _s in rerank(question, fused_chunks, top_n=TOP_N)],
+        "D_hybrid_rerank": [c for c, _s in rerank(question, fused_chunks, top_n=TOP_N, rrf_scores=rrf_scores)],
+        "E_hybrid_rerank_query_rewrite": [
+            c for c, _s in rerank(question, [c for c, _ in fused_rw], top_n=TOP_N, rrf_scores=rrf_scores_rw)
+        ],
     }
 
 
 # ------------------------------------------------------------------ step 2: generation
-def generate_answer(question, chunks):
+def generate_answer(db, question, chunks, document_ids):
     """Same generate step as the app. No passages -> the app would say 'insufficient evidence'."""
     if not chunks:
         return NO_EVIDENCE_ANSWER
-    state = {"question": question, "top_chunks": [(chunk, 0.0) for chunk in chunks]}
-    raw = generate_node(state, config={})["raw_answer"]
-    return re.sub(r"\s*\[\d+\]", "", raw).strip()   # drop [1] markers; RAGAS judges plain text
+    state = {"question": question, "top_chunks": [(str(chunk.id), 0.0) for chunk in chunks], "document_ids": document_ids}
+    config = {"configurable": {"db": db}}
+    raw = generate_node(state, config)["raw_answer"]
+    return re.sub(r"\s*\[\d+\]", "", raw).strip()  # drop [1] markers; RAGAS judges plain text
 
 
 # ------------------------------------------------------------------ our own extra metric
@@ -137,7 +157,7 @@ def main():
                     "config": config,
                     "question": item["question"],
                     "reference": item["reference"],
-                    "response": generate_answer(item["question"], chunks),
+                    "response": generate_answer(db, item["question"], chunks, document_ids),
                     "contexts": [c.content for c in chunks] or [NO_PASSAGES],
                     "pages_retrieved": [c.page_number for c in chunks],
                     "gold_pages": item["gold_pages"],
@@ -188,10 +208,10 @@ def main():
 
     # ---- print table
     header = ["config", "faithful", "ans_relev", "ctx_prec", "ctx_recall", "page_hit"]
-    print("\n" + "".join(f"{h:<18}" for h in header))
+    print("\n" + "".join(f"{h:<30}" for h in header))
     for config, e in summary.items():
         values = [e["faithfulness"], e["answer_relevancy"], e["context_precision"], e["context_recall"], e["page_hit"]]
-        print(f"{config:<18}" + "".join(f"{('n/a' if v is None else v):<18}" for v in values))
+        print(f"{config:<30}" + "".join(f"{('n/a' if v is None else v):<30}" for v in values))
     print(f"\nSaved: {json_path}\n       {csv_path}")
 
 

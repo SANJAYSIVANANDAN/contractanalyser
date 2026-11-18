@@ -1,16 +1,26 @@
-fastapi==0.115.6
+fastapi>=0.118.0
 uvicorn[standard]==0.34.0
 pydantic-settings>=2.7.0
 sqlalchemy==2.0.36
 psycopg[binary]==3.2.3
 pgvector==0.3.6
-alembic==1.14.0
 python-multipart==0.0.20
 celery==5.4.0
-redis==5.2.1
+redis==6.1.0  # celery 5.4's kombu Redis transport requires redis-py>=6.1.0
 openai==1.59.3
+rank-bm25==0.2.2
 sentence-transformers==6.3.0
 langchain-core==0.3.86
 langchain-openai==0.3.8
 langgraph==1.0.1
+langgraph-checkpoint-postgres==2.0.17
+psycopg-pool==3.2.4
 langfuse==5.2.0
+passlib[bcrypt]==1.7.4
+bcrypt==4.0.1  # passlib 1.7.4's self-test breaks on bcrypt>=4.1 (ValueError on its own internal check)
+pyjwt==2.10.1
+email-validator==2.2.0
+docling==2.150.1
+streamlit==1.67.0
+requests==2.34.2
+ragas==0.4.4

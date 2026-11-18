@@ -10,9 +10,10 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.auth.dependencies import get_current_user
 from app.db.database import SessionLocal, get_db
-from app.db.models import COMPLETED, Conversation, Document, Message
-from app.schemas.chat import ChatRequest, ChatResponse, MessageOut
+from app.db.models import COMPLETED, Conversation, Document, Message, User
+from app.schemas.chat import ChatRequest, ChatResponse, ConversationOut, MessageOut
 from app.services.rag import build_rag_config, rag_graph, run_rag
 
 logger = logging.getLogger(__name__)
@@ -24,11 +25,11 @@ TRANSIENT_ERRORS = (httpx.TransportError, openai.APIConnectionError, openai.APIT
 MAX_ATTEMPTS = 3
 
 
-def run_rag_with_retry(db: Session, question: str, document_ids: list[uuid.UUID], trace_metadata: dict | None = None):
+def run_rag_with_retry(db: Session, question: str, document_ids: list[uuid.UUID], thread_id: str, trace_metadata: dict | None = None):
     """Run the whole pipeline, retrying if the connection to OpenAI drops."""
     for attempt in range(1, MAX_ATTEMPTS + 1):
         try:
-            return run_rag(db, question, document_ids, trace_metadata)
+            return run_rag(db, question, document_ids, thread_id, trace_metadata)
         except TRANSIENT_ERRORS as error:
             logger.warning("OpenAI connection problem (attempt %d/%d): %s", attempt, MAX_ATTEMPTS, type(error).__name__)
             if attempt == MAX_ATTEMPTS:
@@ -36,21 +37,21 @@ def run_rag_with_retry(db: Session, question: str, document_ids: list[uuid.UUID]
             time.sleep(attempt)   # wait 1 s, then 2 s
 
 
-def resolve_document_ids(db: Session, requested: list[uuid.UUID]) -> list[uuid.UUID]:
-    """Only COMPLETED documents can be searched. Empty request = all completed documents."""
-    stmt = select(Document.id).where(Document.status == COMPLETED)
+def resolve_document_ids(db: Session, user: User, requested: list[uuid.UUID]) -> list[uuid.UUID]:
+    """Only this user's COMPLETED documents can be searched. Empty request = all of them."""
+    stmt = select(Document.id).where(Document.status == COMPLETED, Document.user_id == user.id)
     if requested:
         stmt = stmt.where(Document.id.in_(requested))
     return list(db.scalars(stmt))
 
 
-def get_or_create_conversation(db: Session, request: ChatRequest) -> Conversation:
+def get_or_create_conversation(db: Session, user: User, request: ChatRequest) -> Conversation:
     if request.conversation_id:
         conversation = db.get(Conversation, request.conversation_id)
-        if conversation is None:
+        if conversation is None or conversation.user_id != user.id:
             raise HTTPException(404, "Conversation not found")
         return conversation
-    conversation = Conversation(title=request.question[:60])
+    conversation = Conversation(user_id=user.id, title=request.question[:60])
     db.add(conversation)
     db.flush()   # assigns the id without committing yet
     return conversation
@@ -71,13 +72,14 @@ def save_exchange(db: Session, conversation: Conversation, question: str, state:
 
 
 @router.post("/chat", response_model=ChatResponse)
-def chat(request: ChatRequest, db: Session = Depends(get_db)):
-    document_ids = resolve_document_ids(db, request.document_ids)
-    conversation = get_or_create_conversation(db, request)
+def chat(request: ChatRequest, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    document_ids = resolve_document_ids(db, user, request.document_ids)
+    conversation = get_or_create_conversation(db, user, request)
+    thread_id = f"{user.id}:{conversation.id}"
 
     trace_metadata = {"langfuse_session_id": str(conversation.id), "langfuse_tags": ["chat"]}
     try:
-        state = run_rag_with_retry(db, request.question, document_ids, trace_metadata) if document_ids else None
+        state = run_rag_with_retry(db, request.question, document_ids, thread_id, trace_metadata) if document_ids else None
     except Exception as e:
         logger.exception("RAG pipeline failed")
         raise HTTPException(502, f"Answer generation failed: {type(e).__name__}")
@@ -101,15 +103,16 @@ def sse(event: str, data: dict) -> str:
 
 
 @router.post("/chat/stream")
-def chat_stream(request: ChatRequest):
+def chat_stream(request: ChatRequest, user: User = Depends(get_current_user)):
     """Streams the answer. NOTE: no Depends(get_db) here. FastAPI closes dependency
     sessions before a streaming body finishes, so the generator owns its own session."""
 
     def event_stream():
         db = SessionLocal()
         try:
-            document_ids = resolve_document_ids(db, request.document_ids)
-            conversation = get_or_create_conversation(db, request)
+            document_ids = resolve_document_ids(db, user, request.document_ids)
+            conversation = get_or_create_conversation(db, user, request)
+            thread_id = f"{user.id}:{conversation.id}"
             if not document_ids:
                 yield sse("error", {"message": "No processed documents are available to search."})
                 return
@@ -122,7 +125,7 @@ def chat_stream(request: ChatRequest):
                     trace_metadata = {"langfuse_session_id": str(conversation.id), "langfuse_tags": ["chat-stream"]}
                     for mode, payload in rag_graph.stream(
                         {"question": request.question, "document_ids": document_ids},
-                        config=build_rag_config(db, trace_metadata),
+                        config=build_rag_config(db, thread_id, trace_metadata),
                         stream_mode=["messages", "values"],
                     ):
                         if mode == "messages":
@@ -182,9 +185,17 @@ def chat_stream(request: ChatRequest):
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
+@router.get("/conversations", response_model=list[ConversationOut])
+def list_conversations(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """So a returning user can pick up a previous conversation after logging back in."""
+    stmt = select(Conversation).where(Conversation.user_id == user.id).order_by(Conversation.created_at.desc())
+    return db.scalars(stmt).all()
+
+
 @router.get("/conversations/{conversation_id}/messages", response_model=list[MessageOut])
-def get_messages(conversation_id: uuid.UUID, db: Session = Depends(get_db)):
-    if db.get(Conversation, conversation_id) is None:
+def get_messages(conversation_id: uuid.UUID, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    conversation = db.get(Conversation, conversation_id)
+    if conversation is None or conversation.user_id != user.id:
         raise HTTPException(404, "Conversation not found")
     stmt = select(Message).where(Message.conversation_id == conversation_id).order_by(Message.created_at)
     return db.scalars(stmt).all()

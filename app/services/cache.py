@@ -15,9 +15,9 @@ redis_client = redis.Redis.from_url(
 )
 
 RETRIEVAL_CACHE_TTL = 600  # seconds
-# Part of every cache key. Bump it whenever retrieval logic changes (RRF k, top-k, search
-# queries...) so old cached results are never served for the new logic.
-RETRIEVAL_VERSION = "v1-rrf60-top15"
+# Part of every cache key. Bump it whenever retrieval logic changes (fusion, BM25, pool
+# sizes, reranker...) so old cached results are never served for the new logic.
+RETRIEVAL_VERSION = "v2-bm25-rrf60-top30"
 
 
 # ------------------------------------------------------------------ locks (used by the worker)

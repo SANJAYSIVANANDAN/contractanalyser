@@ -1,4 +1,4 @@
-"""DocuPilot AI — minimal Streamlit UI.
+"""ContractAnalyser — minimal Streamlit UI.
 
 Streamlit re-runs this whole script from top to bottom on every click or message.
 Anything that must survive between runs lives in st.session_state.
@@ -10,15 +10,30 @@ import time
 import requests
 import streamlit as st
 
-API_URL = os.environ.get("API_URL", "http://localhost:8001")
+API_URL = os.environ.get("API_URL", "http://localhost:8000")
 
-st.set_page_config(page_title="DocuPilot AI", layout="wide")
+st.set_page_config(page_title="ContractAnalyser", layout="wide")
+
+
+# ------------------------------------------------------------ session state
+if "token" not in st.session_state:
+    st.session_state.token = None
+if "user_email" not in st.session_state:
+    st.session_state.user_email = None
+if "messages" not in st.session_state:
+    st.session_state.messages = []          # [{"role", "content", "citations", "warning"}]
+if "conversation_id" not in st.session_state:
+    st.session_state.conversation_id = None
 
 
 # ------------------------------------------------------------ API helpers
+def auth_headers():
+    return {"Authorization": f"Bearer {st.session_state.token}"}
+
+
 def api_get(path):
     try:
-        response = requests.get(f"{API_URL}{path}", timeout=10)
+        response = requests.get(f"{API_URL}{path}", headers=auth_headers(), timeout=10)
         response.raise_for_status()
         return response.json()
     except requests.RequestException:
@@ -30,7 +45,9 @@ def stream_chat(question, document_ids, conversation_id, result):
     Reads the SSE stream line by line. When the 'citations'/'done'/'error' events
     arrive, it stores them in the `result` dict so the caller can show them afterwards."""
     body = {"question": question, "document_ids": document_ids, "conversation_id": conversation_id}
-    with requests.post(f"{API_URL}/chat/stream", json=body, stream=True, timeout=120) as response:
+    with requests.post(
+        f"{API_URL}/chat/stream", json=body, headers=auth_headers(), stream=True, timeout=120
+    ) as response:
         response.raise_for_status()
         event = None
         for line in response.iter_lines(decode_unicode=True):
@@ -75,14 +92,93 @@ def show_citations(citations):
             st.text(c["supporting_excerpt"])
 
 
-# ------------------------------------------------------------ session state
-if "messages" not in st.session_state:
-    st.session_state.messages = []          # [{"role", "content", "citations", "warning"}]
-if "conversation_id" not in st.session_state:
-    st.session_state.conversation_id = None
+# ------------------------------------------------------------ login / register gate
+def login_screen():
+    st.title("ContractAnalyser")
+    st.caption("Sign in to see your documents and pick up past conversations.")
+    tab_login, tab_register = st.tabs(["Log in", "Register"])
 
-# ------------------------------------------------------------ sidebar: upload + documents
+    with tab_login:
+        with st.form("login_form"):
+            email = st.text_input("Email")
+            password = st.text_input("Password", type="password")
+            submitted = st.form_submit_button("Log in")
+        if submitted:
+            try:
+                response = requests.post(f"{API_URL}/auth/login", json={"email": email, "password": password}, timeout=10)
+            except requests.RequestException:
+                st.error("Could not reach the API")
+            else:
+                if response.ok:
+                    data = response.json()
+                    st.session_state.token = data["access_token"]
+                    st.session_state.user_email = data["email"]
+                    st.rerun()
+                else:
+                    st.error(response.json().get("detail", "Login failed"))
+
+    with tab_register:
+        with st.form("register_form"):
+            email = st.text_input("Email", key="register_email")
+            password = st.text_input("Password (min 8 characters)", type="password", key="register_password")
+            submitted = st.form_submit_button("Create account")
+        if submitted:
+            try:
+                response = requests.post(f"{API_URL}/auth/register", json={"email": email, "password": password}, timeout=10)
+            except requests.RequestException:
+                st.error("Could not reach the API")
+            else:
+                if response.ok:
+                    data = response.json()
+                    st.session_state.token = data["access_token"]
+                    st.session_state.user_email = data["email"]
+                    st.rerun()
+                else:
+                    st.error(response.json().get("detail", "Registration failed"))
+
+
+if not st.session_state.token:
+    login_screen()
+    st.stop()
+
+
+# ------------------------------------------------------------ sidebar: account + conversations + documents
 with st.sidebar:
+    st.caption(f"Signed in as **{st.session_state.user_email}**")
+    if st.button("Log out"):
+        st.session_state.token = None
+        st.session_state.user_email = None
+        st.session_state.messages = []
+        st.session_state.conversation_id = None
+        st.rerun()
+
+    st.divider()
+    st.header("Conversations")
+
+    if st.button("New conversation"):
+        st.session_state.messages = []
+        st.session_state.conversation_id = None
+        st.rerun()
+
+    conversations = api_get("/conversations") or []
+    for conv in conversations:
+        label = conv["title"] or "(untitled)"
+        is_current = conv["id"] == st.session_state.conversation_id
+        if st.button(("➡️ " if is_current else "") + label, key=f"conv-{conv['id']}"):
+            history = api_get(f"/conversations/{conv['id']}/messages") or []
+            st.session_state.conversation_id = conv["id"]
+            st.session_state.messages = [
+                {
+                    "role": m["role"],
+                    "content": m["content"],
+                    "citations": m["citations"] or [],
+                    "warning": None,
+                }
+                for m in history
+            ]
+            st.rerun()
+
+    st.divider()
     st.header("Documents")
 
     uploaded = st.file_uploader("Upload a contract (PDF)", type=["pdf"])
@@ -92,6 +188,7 @@ with st.sidebar:
                 response = requests.post(
                     f"{API_URL}/documents/upload",
                     files={"file": (uploaded.name, uploaded.getvalue(), "application/pdf")},
+                    headers=auth_headers(),
                     timeout=60,
                 )
             except requests.RequestException:
@@ -131,7 +228,7 @@ with st.sidebar:
             if doc["analysis_status"] not in ("PENDING", "PROCESSING"):
                 if col2.button("Analyse", key=f"analyze-{doc['id']}"):
                     try:
-                        response = requests.post(f"{API_URL}/documents/{doc['id']}/analyze", timeout=30)
+                        response = requests.post(f"{API_URL}/documents/{doc['id']}/analyze", headers=auth_headers(), timeout=30)
                         if response.ok:
                             st.success("Analysis started. Click 'Refresh status' to check progress.")
                         else:
@@ -156,13 +253,8 @@ with st.sidebar:
     )
     selected_ids = [completed[name] for name in selected_names]
 
-    if st.button("New conversation"):
-        st.session_state.messages = []
-        st.session_state.conversation_id = None
-        st.rerun()
-
 # ------------------------------------------------------------ main: chat
-st.title("DocuPilot AI — Contract Q&A")
+st.title("ContractAnalyser — Contract Q&A")
 st.caption("Answers come only from the selected contracts and cite their source pages. "
            "This is an informational aid, not legal advice.")
 

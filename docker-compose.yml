@@ -11,15 +11,6 @@ services:
       timeout: 5s
       retries: 10
 
-  rabbitmq:
-    image: rabbitmq:3.13-management     # management UI at http://localhost:15672 (guest/guest)
-    ports: ["5673:5672", "15673:15672"]
-    healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
-      interval: 10s
-      timeout: 10s
-      retries: 10
-
   redis:
     image: redis:7-alpine
     ports: ["6380:6379"]
@@ -29,6 +20,7 @@ services:
       timeout: 3s
       retries: 10
 
+  # One image (built from the single Dockerfile), three different `command:`s below.
   api:
     build: .
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
@@ -36,17 +28,14 @@ services:
     ports: ["8001:8000"]
     volumes:
       - .:/app                            # live code reload during development
-      - uploads:/app/uploads              # shared with the worker (added in Phase 2)
-      - model_cache:/root/.cache          # reranker model downloads once
+      - uploads:/app/uploads              # shared with the worker
+      - model_cache:/root/.cache          # reranker/Docling model downloads once
     depends_on:
       postgres: { condition: service_healthy }
-      rabbitmq: { condition: service_healthy }
       redis: { condition: service_healthy }
 
   worker:
-    build:
-      context: .
-      dockerfile: Dockerfile.worker       # heavier image: Docling + PyTorch
+    build: .
     command: celery -A app.workers.celery_app worker --loglevel=info --concurrency=1
     env_file: .env
     volumes:
@@ -55,35 +44,16 @@ services:
       - model_cache:/root/.cache          # Docling/HuggingFace models download ONCE, then persist
     depends_on:
       postgres: { condition: service_healthy }
-      rabbitmq: { condition: service_healthy }
       redis: { condition: service_healthy }
 
   frontend:
-    build:
-      context: .
-      dockerfile: Dockerfile.frontend
+    build: .
     command: streamlit run frontend/streamlit_app.py --server.port 8501 --server.address 0.0.0.0 --server.headless true
     environment:
       API_URL: http://api:8000            # container-to-container address
-    ports: ["8502:8501"]                  # host 8502 (8501 was taken by another project)
-    volumes:
-      - ./frontend:/app/frontend
+    ports: ["8502:8501"]
     depends_on:
       - api
-
-  eval:
-    profiles: ["eval"]                    # not started by a plain `docker compose up`
-    build:
-      context: .
-      dockerfile: Dockerfile.eval
-    command: python -m app.evaluation.evaluate
-    env_file: .env
-    volumes:
-      - .:/app
-      - model_cache:/root/.cache
-    depends_on:
-      postgres: { condition: service_healthy }
-      redis: { condition: service_healthy }
 
 volumes:
   model_cache:

@@ -1,7 +1,11 @@
-from sqlalchemy import create_engine
+import logging
+
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 # Engine = the connection pool to PostgreSQL. Created once per process.
 engine = create_engine(settings.database_url, pool_pre_ping=True)
@@ -11,7 +15,19 @@ SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
 
 class Base(DeclarativeBase):
-    """All ORM models (models.py, Phase 2) inherit from this."""
+    """All ORM models (models.py) inherit from this."""
+
+
+def init_db() -> None:
+    """Creates the pgvector extension and every table directly from the models,
+    no migration tool involved. Safe to call on every process startup (api, worker):
+    CREATE EXTENSION/TABLE IF NOT EXISTS is idempotent."""
+    with engine.begin() as conn:
+        conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+    from app.db import models  # noqa: F401  (registers tables on Base.metadata)
+
+    Base.metadata.create_all(bind=engine)
+    logger.info("Database schema ready (no Alembic)")
 
 
 def get_db():

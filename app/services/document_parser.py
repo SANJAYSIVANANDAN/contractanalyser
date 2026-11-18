@@ -14,8 +14,8 @@ _converter = None  # created once per worker process, then reused (loading model
 def _get_converter():
     global _converter
     if _converter is None:
-        # Imported here (not at the top) so the API container, which doesn't have
-        # Docling installed, can still import this module.
+        # Imported here (not at the top) so a process that doesn't need parsing
+        # doesn't pay Docling's import cost.
         from docling.datamodel.base_models import InputFormat
         from docling.datamodel.pipeline_options import PdfPipelineOptions
         from docling.document_converter import DocumentConverter, PdfFormatOption
@@ -29,8 +29,8 @@ def _get_converter():
 
 
 def parse_pdf(file_path: str) -> list[dict]:
-    """Returns [{"text": str, "page_number": int | None, "section_title": str | None}, ...]
-    in reading order. Raises ValueError if no text could be extracted."""
+    """Returns [{"text", "page_number", "section_title", "is_table"}, ...] in reading order.
+    Raises ValueError if no text could be extracted."""
     result = _get_converter().convert(file_path)
     document = result.document
 
@@ -42,12 +42,13 @@ def parse_pdf(file_path: str) -> list[dict]:
         if label in SKIP_LABELS:
             continue
 
+        is_table = label == "table"
         # Tables: export as markdown so rows/columns stay readable
-        if label == "table":
+        if is_table:
             text = item.export_to_markdown(doc=document)
         else:
             text = getattr(item, "text", "") or ""
-        text = html.unescape(text).strip()   # Docling's table export leaves "&amp;" in the text
+        text = html.unescape(text).strip()  # Docling's table export leaves "&amp;" in the text
         if not text:
             continue
 
@@ -58,7 +59,9 @@ def parse_pdf(file_path: str) -> list[dict]:
         # Page number comes from provenance. If Docling gave none, we store None (never guess).
         page_number = item.prov[0].page_no if item.prov else None
 
-        blocks.append({"text": text, "page_number": page_number, "section_title": current_section})
+        blocks.append(
+            {"text": text, "page_number": page_number, "section_title": current_section, "is_table": is_table}
+        )
 
     if not blocks:
         raise ValueError("No text could be extracted from this PDF (is it a scanned image?)")

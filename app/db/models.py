@@ -3,7 +3,7 @@ from datetime import datetime
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func
-from sqlalchemy.dialects.postgresql import TSVECTOR, UUID
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.database import Base
@@ -15,10 +15,23 @@ COMPLETED = "COMPLETED"
 FAILED = "FAILED"
 
 
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    hashed_password: Mapped[str] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    conversations: Mapped[list["Conversation"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    documents: Mapped[list["Document"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+
+
 class Document(Base):
     __tablename__ = "documents"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     filename: Mapped[str] = mapped_column(String(255))
     file_path: Mapped[str] = mapped_column(String(500))
     file_hash: Mapped[str] = mapped_column(String(64), index=True)  # SHA-256 hex
@@ -30,6 +43,7 @@ class Document(Base):
     analysis_error_message: Mapped[str | None] = mapped_column(Text, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
+    user: Mapped["User"] = relationship(back_populates="documents")
     # cascade: deleting a document also deletes its chunks and clauses
     chunks: Mapped[list["Chunk"]] = relationship(back_populates="document", cascade="all, delete-orphan")
     clauses: Mapped[list["Clause"]] = relationship(back_populates="document", cascade="all, delete-orphan")
@@ -44,14 +58,15 @@ class Chunk(Base):
     content: Mapped[str] = mapped_column(Text)
     page_number: Mapped[int | None] = mapped_column(Integer)  # None if Docling can't tell
     section_title: Mapped[str | None] = mapped_column(String(500))
-    embedding = mapped_column(Vector(1536))          # OpenAI text-embedding-3-small
-    search_vector = mapped_column(TSVECTOR)          # for keyword search
+    is_table: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    embedding = mapped_column(Vector(1536))  # OpenAI text-embedding-3-small
+    # No search_vector/TSVECTOR column: the sparse leg is real BM25, built in-process
+    # per request over this document's chunks (see services/retrieval.py) instead of a
+    # Postgres full-text index, so there's nothing to keep in sync here.
 
     document: Mapped["Document"] = relationship(back_populates="chunks")
 
     __table_args__ = (
-        # GIN index makes full-text search fast
-        Index("ix_chunks_search_vector", "search_vector", postgresql_using="gin"),
         # HNSW index makes cosine nearest-neighbour search fast
         Index(
             "ix_chunks_embedding",
@@ -67,9 +82,11 @@ class Conversation(Base):
     __tablename__ = "conversations"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     title: Mapped[str | None] = mapped_column(String(255))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
+    user: Mapped["User"] = relationship(back_populates="conversations")
     messages: Mapped[list["Message"]] = relationship(back_populates="conversation", cascade="all, delete-orphan")
 
 
