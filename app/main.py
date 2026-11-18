@@ -5,7 +5,7 @@ from fastapi import Depends, FastAPI
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.api import chat, documents
+from app.api import analysis, chat, documents
 from app.db.database import get_db
 from app.services.reranker import _get_model
 
@@ -23,6 +23,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="DocuPilot AI", lifespan=lifespan)
 app.include_router(documents.router)
 app.include_router(chat.router)
+app.include_router(analysis.router)
 
 
 @app.get("/health")

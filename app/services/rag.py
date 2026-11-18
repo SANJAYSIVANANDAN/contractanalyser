@@ -30,8 +30,9 @@ from langchain_openai import ChatOpenAI
 from langgraph.graph import END, START, StateGraph
 
 from app.config import settings
-from app.db.models import Chunk
+from app.db.models import Chunk, Clause
 from app.schemas.chat import Citation
+from app.services.observability import get_langfuse_handler
 from app.services.reranker import rerank
 from app.services.retrieval import hybrid_retrieve
 
@@ -101,7 +102,8 @@ class RagState(TypedDict, total=False):
     document_ids: list[uuid.UUID]
     # filled in by nodes
     candidates: list[tuple[Chunk, float]]   # after hybrid retrieval + RRF
-    top_chunks: list[tuple[Chunk, float]]   # the passages sent to the LLM
+    top_chunks: list[tuple[Chunk, float]]   # the best chunks, before clauses are added
+    all_passages: list[tuple[Chunk | Clause, float]]   # top_chunks + this document's analysed clauses
     raw_answer: str                         # exactly what the LLM wrote
     answer: str                             # cleaned final answer
     citations: list[Citation]
@@ -164,20 +166,29 @@ def insufficient_node(state: RagState):
 
 
 def generate_node(state: RagState, config: RunnableConfig):
+    # Add this document's analysed clauses (if any) as extra passages, so the model can
+    # cite structured analysis findings alongside raw chunks. Clause.content/section_title
+    # mirror Chunk's shape (see db/models.py), so the formatting below needs no branching.
+    db = config["configurable"]["db"]
+    clauses = list(
+        db.scalars(select(Clause).where(Clause.document_id.in_(state["document_ids"])).order_by(Clause.clause_type))
+    )
+    all_passages = list(state["top_chunks"]) + [(clause, 0.0) for clause in clauses]
+
     # Number the passages 1..N. These numbers are the only IDs the LLM sees.
     passages = []
-    for number, (chunk, _score) in enumerate(state["top_chunks"], start=1):
+    for number, (obj, _score) in enumerate(all_passages, start=1):
         passages.append(
-            f"[{number}] File: {chunk.document.filename} | Page: {chunk.page_number} | "
-            f"Section: {chunk.section_title or 'n/a'}\n<passage>\n{chunk.content}\n</passage>"
+            f"[{number}] File: {obj.document.filename} | Page: {obj.page_number} | "
+            f"Section: {obj.section_title or 'n/a'}\n<passage>\n{obj.content}\n</passage>"
         )
     message = chain.invoke({"question": state["question"], "passages": "\n\n".join(passages)}, config)
-    return {"raw_answer": message.content}
+    return {"raw_answer": message.content, "all_passages": all_passages}
 
 
 def validate_citations_node(state: RagState):
     raw = state["raw_answer"]
-    sent = {number: chunk for number, (chunk, _score) in enumerate(state["top_chunks"], start=1)}
+    sent = {number: obj for number, (obj, _score) in enumerate(state["all_passages"], start=1)}
 
     cited_numbers = []   # order of first appearance
     rejected = []
@@ -244,9 +255,22 @@ def build_graph():
 rag_graph = build_graph()   # compiled once per process
 
 
-def run_rag(db, question: str, document_ids: list[uuid.UUID]) -> RagState:
+def build_rag_config(db, trace_metadata: dict | None = None) -> RunnableConfig:
+    """The RunnableConfig shared by run_rag and the /chat/stream graph.stream() call.
+    Adding Langfuse's callback here traces every LLM call nested inside the graph
+    (LangGraph propagates config, including callbacks, into each node)."""
+    config: RunnableConfig = {"configurable": {"db": db}}
+    handler = get_langfuse_handler()
+    if handler:
+        config["callbacks"] = [handler]
+        if trace_metadata:
+            config["metadata"] = trace_metadata
+    return config
+
+
+def run_rag(db, question: str, document_ids: list[uuid.UUID], trace_metadata: dict | None = None) -> RagState:
     """Non-streaming: run the whole graph and return the final state."""
     return rag_graph.invoke(
         {"question": question, "document_ids": document_ids},
-        config={"configurable": {"db": db}},
+        config=build_rag_config(db, trace_metadata),
     )

@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from app.db.database import SessionLocal, get_db
 from app.db.models import COMPLETED, Conversation, Document, Message
 from app.schemas.chat import ChatRequest, ChatResponse, MessageOut
-from app.services.rag import rag_graph, run_rag
+from app.services.rag import build_rag_config, rag_graph, run_rag
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["chat"])
@@ -24,11 +24,11 @@ TRANSIENT_ERRORS = (httpx.TransportError, openai.APIConnectionError, openai.APIT
 MAX_ATTEMPTS = 3
 
 
-def run_rag_with_retry(db: Session, question: str, document_ids: list[uuid.UUID]):
+def run_rag_with_retry(db: Session, question: str, document_ids: list[uuid.UUID], trace_metadata: dict | None = None):
     """Run the whole pipeline, retrying if the connection to OpenAI drops."""
     for attempt in range(1, MAX_ATTEMPTS + 1):
         try:
-            return run_rag(db, question, document_ids)
+            return run_rag(db, question, document_ids, trace_metadata)
         except TRANSIENT_ERRORS as error:
             logger.warning("OpenAI connection problem (attempt %d/%d): %s", attempt, MAX_ATTEMPTS, type(error).__name__)
             if attempt == MAX_ATTEMPTS:
@@ -75,8 +75,9 @@ def chat(request: ChatRequest, db: Session = Depends(get_db)):
     document_ids = resolve_document_ids(db, request.document_ids)
     conversation = get_or_create_conversation(db, request)
 
+    trace_metadata = {"langfuse_session_id": str(conversation.id), "langfuse_tags": ["chat"]}
     try:
-        state = run_rag_with_retry(db, request.question, document_ids) if document_ids else None
+        state = run_rag_with_retry(db, request.question, document_ids, trace_metadata) if document_ids else None
     except Exception as e:
         logger.exception("RAG pipeline failed")
         raise HTTPException(502, f"Answer generation failed: {type(e).__name__}")
@@ -118,9 +119,10 @@ def chat_stream(request: ChatRequest):
             for attempt in range(1, MAX_ATTEMPTS + 1):
                 try:
                     # stream_mode "messages" = LLM tokens as they arrive; "values" = full state after each node
+                    trace_metadata = {"langfuse_session_id": str(conversation.id), "langfuse_tags": ["chat-stream"]}
                     for mode, payload in rag_graph.stream(
                         {"question": request.question, "document_ids": document_ids},
-                        config={"configurable": {"db": db}},
+                        config=build_rag_config(db, trace_metadata),
                         stream_mode=["messages", "values"],
                     ):
                         if mode == "messages":

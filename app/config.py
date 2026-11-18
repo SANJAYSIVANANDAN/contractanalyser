@@ -11,6 +11,11 @@ class Settings(BaseSettings):
     upload_dir: str = "/app/uploads"
     openai_api_key: str = ""
 
+    # Optional: tracing for the LangChain/LangGraph pipelines. Empty keys = tracing disabled.
+    langfuse_public_key: str = ""
+    langfuse_secret_key: str = ""
+    langfuse_host: str = "https://cloud.langfuse.com"
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 

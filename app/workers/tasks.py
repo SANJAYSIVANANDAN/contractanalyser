@@ -4,11 +4,13 @@ import openai
 from sqlalchemy import delete, func
 
 from app.db.database import SessionLocal
-from app.db.models import COMPLETED, FAILED, PENDING, PROCESSING, Chunk, Document
+from app.db.models import COMPLETED, FAILED, PENDING, PROCESSING, Chunk, Clause, Document
 from app.services.cache import acquire_lock, invalidate_document, release_lock
 from app.services.chunker import chunk_blocks
+from app.services.contract_analyzer import analyze_document
 from app.services.document_parser import parse_pdf
 from app.services.embeddings import embed_texts
+from app.services.observability import flush as flush_traces
 from app.workers.celery_app import celery_app
 
 # Temporary problems worth retrying. Anything else (bad PDF, bug) fails immediately.
@@ -108,6 +110,93 @@ def _set_status(document_id: uuid.UUID, status: str):
         doc = db.get(Document, document_id)
         if doc:
             doc.status = status
+            db.commit()
+    finally:
+        db.close()
+
+
+def mark_analysis_failed(document_id: uuid.UUID, message: str):
+    db = SessionLocal()
+    try:
+        doc = db.get(Document, document_id)
+        if doc:
+            doc.analysis_status = FAILED
+            doc.analysis_error_message = message[:1000]
+            db.commit()
+    finally:
+        db.close()
+
+
+@celery_app.task(name="analyze_contract", bind=True, max_retries=3)
+def analyze_contract(self, document_id: str):
+    doc_id = uuid.UUID(document_id)
+
+    lock_key = f"lock:analyze_contract:{document_id}"
+    if not acquire_lock(lock_key):
+        return "skipped: already being analyzed"
+
+    db = SessionLocal()
+    try:
+        doc = db.get(Document, doc_id)
+        if doc is None:
+            return "skipped: document not found"
+        if doc.status != COMPLETED:
+            return "skipped: document not yet ingested"
+        if doc.analysis_status == COMPLETED:
+            return "skipped: already analyzed"
+
+        doc.analysis_status = PROCESSING
+        doc.analysis_error_message = None
+        db.commit()
+
+        # --- slow work (several LLM calls) happens OUTSIDE any open write transaction ---
+        findings = analyze_document(db, doc_id)
+
+        # --- ONE transaction: replace old clauses, insert new, mark COMPLETED ---
+        db.execute(delete(Clause).where(Clause.document_id == doc_id))
+        for finding in findings:
+            db.add(
+                Clause(
+                    document_id=doc_id,
+                    clause_type=finding.clause_type,
+                    found=finding.found,
+                    title=finding.title,
+                    summary=finding.summary,
+                    supporting_text=finding.supporting_text,
+                    risk_level=finding.risk_level,
+                    explanation=finding.explanation,
+                    page_number=finding.page_number,
+                )
+            )
+        doc.analysis_status = COMPLETED
+        db.commit()
+        return f"ok: {len(findings)} clauses"
+
+    except RETRYABLE as e:
+        db.rollback()
+        if self.request.retries >= self.max_retries:
+            mark_analysis_failed(doc_id, f"Gave up after retries: {e}")
+            raise
+        _set_analysis_status(doc_id, PENDING)
+        raise self.retry(exc=e, countdown=20 * 2**self.request.retries)
+
+    except Exception as e:
+        db.rollback()
+        mark_analysis_failed(doc_id, str(e))
+        raise
+
+    finally:
+        db.close()
+        release_lock(lock_key)
+        flush_traces()   # worker process may idle a while before the next task; don't lose traces
+
+
+def _set_analysis_status(document_id: uuid.UUID, status: str):
+    db = SessionLocal()
+    try:
+        doc = db.get(Document, document_id)
+        if doc:
+            doc.analysis_status = status
             db.commit()
     finally:
         db.close()

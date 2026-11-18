@@ -12,6 +12,8 @@ class DocumentOut(BaseModel):
     filename: str
     status: str
     error_message: str | None
+    analysis_status: str | None
+    analysis_error_message: str | None
     created_at: datetime
 
 

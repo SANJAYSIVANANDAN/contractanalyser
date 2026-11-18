@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import JSON, DateTime, ForeignKey, Index, Integer, String, Text, func
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import TSVECTOR, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -24,6 +24,10 @@ class Document(Base):
     file_hash: Mapped[str] = mapped_column(String(64), index=True)  # SHA-256 hex
     status: Mapped[str] = mapped_column(String(20), default=PENDING)
     error_message: Mapped[str | None] = mapped_column(Text, default=None)
+    # Contract analysis (clause extraction) is a separate pipeline from ingestion above.
+    # None = never analysed. Reuses the same PENDING/PROCESSING/COMPLETED/FAILED strings.
+    analysis_status: Mapped[str | None] = mapped_column(String(20), default=None)
+    analysis_error_message: Mapped[str | None] = mapped_column(Text, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     # cascade: deleting a document also deletes its chunks and clauses
@@ -94,5 +98,28 @@ class Clause(Base):
     risk_level: Mapped[str | None] = mapped_column(String(20))
     explanation: Mapped[str | None] = mapped_column(Text)
     page_number: Mapped[int | None] = mapped_column(Integer)
+    found: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
 
     document: Mapped["Document"] = relationship(back_populates="clauses")
+
+    __table_args__ = (
+        # One row per clause type per document; re-analysis deletes-and-reinserts, like chunks.
+        UniqueConstraint("document_id", "clause_type", name="ux_clauses_document_clause_type"),
+    )
+
+    @property
+    def content(self) -> str:
+        """Lets a Clause be dropped into rag.py's chunk-shaped passage formatting unchanged."""
+        if not self.found:
+            return f"No such clause was found in this contract. {self.explanation or ''}".strip()
+        parts = [
+            self.summary or "",
+            f'"{self.supporting_text}"' if self.supporting_text else "",
+            f"Risk: {self.risk_level}." if self.risk_level else "",
+            self.explanation or "",
+        ]
+        return "\n".join(part for part in parts if part)
+
+    @property
+    def section_title(self) -> str:
+        return self.title or self.clause_type.replace("_", " ").title()
