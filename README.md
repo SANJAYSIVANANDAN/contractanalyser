@@ -25,8 +25,7 @@ indemnity, IP, confidentiality, and more).
   (vector-only, BM25-only, hybrid RRF, hybrid+rerank, hybrid+rerank+query-rewrite) against a
   hand-written gold Q&A set, so retrieval/reranking changes are measured, not assumed.
 
-See [rag.md](rag.md), [langgraph.md](langgraph.md), [redisandcelery.md](redisandcelery.md), and
-[auth.md](auth.md) for an in-depth look at each of those pieces.
+
 
 ## Running it
 
